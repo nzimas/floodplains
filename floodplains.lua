@@ -7,11 +7,16 @@
 
 engine.name = "Glut"
 
+-- We use 5 main voices (indices 1–5) plus 2 auxiliary voices (6 and 7) for polyphony.
 local num_voices = 5
-local voice_active = {}
-local active_notes = {}         -- per‑voice held note stack
-local pingpong_metros, pingpong_sign = {}, {}
+
+-- Tables for the main voices (1–5)
+local voice_active = {}       -- whether the main voice is active
+local active_notes = {}       -- per‑voice note stack (for MIDI key stacking)
+local pingpong_metros = {}    -- for playhead direction toggling
+local pingpong_sign = {}
 local random_seek_metros = {}
+
 for i = 1, num_voices do
   voice_active[i] = false
   active_notes[i] = {}
@@ -19,6 +24,10 @@ for i = 1, num_voices do
   pingpong_sign[i] = 1
   random_seek_metros[i] = nil
 end
+
+-- Initialize auxiliary voices (indices 6 and 7)
+voice_active[6] = false
+voice_active[7] = false
 
 local ui_metro
 
@@ -32,26 +41,33 @@ for t = 0, 90000, 500 do table.insert(g_morph_time_options, t) end
 local key2_hold = false
 local key2_timer = 0
 
--- Envelope globals per voice
+-- Envelope globals per voice (we extend these for auxiliary voices too)
 local envelope_threads = {}
 local current_env = {}
 for i = 1, num_voices do
   envelope_threads[i] = nil
   current_env[i] = -60  -- in dB
 end
+for i = 6,7 do
+  envelope_threads[i] = nil
+  current_env[i] = -60
+end
 
--- UI squares: top row (voices 1-3) and bottom row (voices 4-5)
+-- UI squares: main voices (1–5) are displayed in 2 rows.
 local square_size = 20
 local positions = {}
+-- Top row: voices 1–3
 local top_y = 10
 local top_margin = math.floor((128 - (3 * square_size)) / 4)
 positions[1] = { x = top_margin, y = top_y }
 positions[2] = { x = top_margin*2 + square_size, y = top_y }
 positions[3] = { x = top_margin*3 + square_size*2, y = top_y }
+-- Bottom row: voices 4–5
 local bottom_y = 40
 local bottom_margin = math.floor((128 - (2 * square_size)) / 3)
 positions[4] = { x = bottom_margin, y = bottom_y }
 positions[5] = { x = bottom_margin*2 + square_size, y = bottom_y }
+-- (Auxiliary voices 6 and 7 are not shown in the UI.)
 
 local function random_float(l, h)
   return l + math.random() * (h - l)
@@ -191,6 +207,9 @@ local function setup_params()
     params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
   end
 
+  params:add_separator("Polyphony")
+  params:add_option("polyphonic_voice", "polyphonic voice", {"1","2","3","4","5"}, 1)
+
   params:add_separator("Transition")
   params:add_option("transition_time", "transition time (ms)",
     g_transition_time_options, 10)
@@ -243,20 +262,41 @@ local function setup_engine()
     engine.gate(i, 0)
     update_playhead(i)
   end
+  -- Ensure auxiliary voices are initially gated off:
+  engine.gate(6, 0)
+  engine.gate(7, 0)
 end
 
 local midi_in
 
--- Modified envelope_attack: always reset the starting volume to -60 dB.
+-- The envelope routines now use the polyphonic voice's envelope times for auxiliary voices.
+local function get_attack_time(i)
+  if i > num_voices then
+    local poly = params:get("polyphonic_voice")
+    return params:get(poly.."attack")
+  else
+    return params:get(i.."attack")
+  end
+end
+
+local function get_release_time(i)
+  if i > num_voices then
+    local poly = params:get("polyphonic_voice")
+    return params:get(poly.."release")
+  else
+    return params:get(i.."release")
+  end
+end
+
 local function envelope_attack(i)
   if envelope_threads[i] then clock.cancel(envelope_threads[i]) end
   current_env[i] = -60
   envelope_threads[i] = clock.run(function()
-    local att_ms = params:get(i.."attack")
+    local att_ms = get_attack_time(i)
     local steps = math.max(1, math.floor(att_ms / 10))
     local dt = att_ms / steps / 1000
     local start_vol = current_env[i]
-    local target_vol = params:get(i.."volume")
+    local target_vol = params:get((i > num_voices) and params:get("polyphonic_voice").."volume" or (i.."volume"))
     for step = 1, steps do
       local t = step / steps
       local new_vol = start_vol + (target_vol - start_vol) * t
@@ -272,7 +312,7 @@ end
 local function envelope_release(i)
   if envelope_threads[i] then clock.cancel(envelope_threads[i]) end
   envelope_threads[i] = clock.run(function()
-    local rel_ms = params:get(i.."release")
+    local rel_ms = get_release_time(i)
     local steps = math.max(1, math.floor(rel_ms / 10))
     local dt = rel_ms / steps / 1000
     local start_vol = current_env[i]
@@ -290,6 +330,7 @@ local function envelope_release(i)
   end)
 end
 
+-- MIDI event handler
 function midi_event(data)
   local msg = midi.to_msg(data)
   if msg.type == "note_on" then
@@ -297,51 +338,189 @@ function midi_event(data)
       -- treat note_on with vel==0 as note_off
       for i = 1, num_voices do
         if msg.ch == params:get("midi_channel_"..i) then
-          for j, n in ipairs(active_notes[i]) do
-            if n == msg.note then
-              table.remove(active_notes[i], j)
-              break
+          if i == params:get("polyphonic_voice") then
+            local chord = active_notes[i]
+            for j, n in ipairs(chord) do
+              if n == msg.note then table.remove(chord, j) break end
             end
-          end
-          if #active_notes[i] == 0 then
-            voice_active[i] = false
-            envelope_release(i)
+            if #chord == 0 then
+              voice_active[i] = false
+              envelope_release(i)
+              engine.gate(6, 0)
+              engine.gate(7, 0)
+            else
+              if msg.note == chord[1] then
+                engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+                engine.seek(i, 0)
+                engine.gate(i, 1)
+                envelope_attack(i)
+              else
+                engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+              end
+              if #chord >= 2 then
+                if #chord == 2 then
+                  engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                  engine.seek(6, 0)
+                  engine.gate(6, 1)
+                  envelope_attack(6)
+                else
+                  engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                end
+              else
+                engine.gate(6, 0)
+              end
+              if #chord >= 3 then
+                if #chord == 3 then
+                  engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                  engine.seek(7, 0)
+                  engine.gate(7, 1)
+                  envelope_attack(7)
+                else
+                  engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                end
+              else
+                engine.gate(7, 0)
+              end
+            end
           else
-            local last_note = active_notes[i][#active_notes[i]]
-            local ratio = math.pow(2, (last_note - 60) / 12)
-            engine.pitch(i, ratio)
+            for j, n in ipairs(active_notes[i]) do
+              if n == msg.note then table.remove(active_notes[i], j) break end
+            end
+            if #active_notes[i] == 0 then
+              voice_active[i] = false
+              envelope_release(i)
+            else
+              local last_note = active_notes[i][#active_notes[i]]
+              engine.pitch(i, math.pow(2, (last_note-60)/12))
+            end
           end
         end
       end
     else
       for i = 1, num_voices do
         if msg.ch == params:get("midi_channel_"..i) then
-          voice_active[i] = true
-          table.insert(active_notes[i], msg.note)
-          local ratio = math.pow(2, (msg.note - 60) / 12)
-          engine.pitch(i, ratio)
-          engine.seek(i, 0)
-          engine.gate(i, 1)
-          envelope_attack(i)
+          if i == params:get("polyphonic_voice") then
+            local chord = active_notes[i]
+            table.insert(chord, msg.note)
+            voice_active[i] = true
+            local file = params:get(i.."sample")
+            if file and file ~= "" then
+              engine.read(6, file)
+              engine.read(7, file)
+            end
+            if #chord == 1 then
+              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+              engine.seek(i, 0)
+              engine.gate(i, 1)
+              envelope_attack(i)
+            else
+              -- Do not re-trigger main envelope; main voice remains on chord[1]
+              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+            end
+            if #chord >= 2 then
+              if #chord == 2 then
+                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                engine.seek(6, 0)
+                engine.gate(6, 1)
+                envelope_attack(6)
+              else
+                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+              end
+            else
+              engine.gate(6, 0)
+            end
+            if #chord >= 3 then
+              if #chord == 3 then
+                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                engine.seek(7, 0)
+                engine.gate(7, 1)
+                envelope_attack(7)
+              else
+                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+              end
+            else
+              engine.gate(7, 0)
+            end
+            if #chord >= 2 then
+              if math.random() < 0.5 then
+                engine.pan(6, -1)
+                engine.pan(7, 1)
+              else
+                engine.pan(6, 1)
+                engine.pan(7, -1)
+              end
+            end
+            if #chord >= 2 then randomize_voice(6) end
+            if #chord >= 3 then randomize_voice(7) end
+          else
+            voice_active[i] = true
+            table.insert(active_notes[i], msg.note)
+            engine.pitch(i, math.pow(2, (msg.note-60)/12))
+            engine.seek(i, 0)
+            engine.gate(i, 1)
+            envelope_attack(i)
+          end
         end
       end
     end
   elseif msg.type == "note_off" then
     for i = 1, num_voices do
       if msg.ch == params:get("midi_channel_"..i) then
-        for j, n in ipairs(active_notes[i]) do
-          if n == msg.note then
-            table.remove(active_notes[i], j)
-            break
+        if i == params:get("polyphonic_voice") then
+          local chord = active_notes[i]
+          for j, n in ipairs(chord) do
+            if n == msg.note then table.remove(chord, j) break end
           end
-        end
-        if #active_notes[i] == 0 then
-          voice_active[i] = false
-          envelope_release(i)
+          if #chord == 0 then
+            voice_active[i] = false
+            envelope_release(i)
+            engine.gate(6, 0)
+            engine.gate(7, 0)
+          else
+            if msg.note == chord[1] then
+              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+              engine.seek(i, 0)
+              engine.gate(i, 1)
+              envelope_attack(i)
+            else
+              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+            end
+            if #chord >= 2 then
+              if #chord == 2 then
+                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                engine.seek(6, 0)
+                engine.gate(6, 1)
+                envelope_attack(6)
+              else
+                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+              end
+            else
+              engine.gate(6, 0)
+            end
+            if #chord >= 3 then
+              if #chord == 3 then
+                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                engine.seek(7, 0)
+                engine.gate(7, 1)
+                envelope_attack(7)
+              else
+                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+              end
+            else
+              engine.gate(7, 0)
+            end
+          end
         else
-          local last_note = active_notes[i][#active_notes[i]]
-          local ratio = math.pow(2, (last_note - 60) / 12)
-          engine.pitch(i, ratio)
+          for j, n in ipairs(active_notes[i]) do
+            if n == msg.note then table.remove(active_notes[i], j) break end
+          end
+          if #active_notes[i] == 0 then
+            voice_active[i] = false
+            envelope_release(i)
+          else
+            local last_note = active_notes[i][#active_notes[i]]
+            engine.pitch(i, math.pow(2, (last_note-60)/12))
+          end
         end
       end
     end
