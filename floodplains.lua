@@ -9,12 +9,12 @@ engine.name = "Glut"
 
 local num_voices = 5
 local voice_active = {}
-local active_notes = {}         -- keep track of currently held note numbers per voice
+local active_notes = {}         -- per‑voice held note stack
 local pingpong_metros, pingpong_sign = {}, {}
 local random_seek_metros = {}
 for i = 1, num_voices do
   voice_active[i] = false
-  active_notes[i] = {}          -- initialize empty list for held notes
+  active_notes[i] = {}
   pingpong_metros[i] = nil
   pingpong_sign[i] = 1
   random_seek_metros[i] = nil
@@ -31,6 +31,14 @@ for t = 0, 90000, 500 do table.insert(g_morph_time_options, t) end
 
 local key2_hold = false
 local key2_timer = 0
+
+-- Envelope globals per voice
+local envelope_threads = {}
+local current_env = {}
+for i = 1, num_voices do
+  envelope_threads[i] = nil
+  current_env[i] = -60  -- in dB
+end
 
 -- UI squares: top row (voices 1-3) and bottom row (voices 4-5)
 local square_size = 20
@@ -178,6 +186,9 @@ local function setup_params()
       end
     end)
     params:add_number("midi_channel_"..i, "MIDI channel "..i, 1, 16, i)
+    -- Attack and Release parameters (in ms)
+    params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
+    params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
   end
 
   params:add_separator("Transition")
@@ -236,6 +247,49 @@ end
 
 local midi_in
 
+-- Modified envelope_attack: always reset the starting volume to -60 dB.
+local function envelope_attack(i)
+  if envelope_threads[i] then clock.cancel(envelope_threads[i]) end
+  current_env[i] = -60
+  envelope_threads[i] = clock.run(function()
+    local att_ms = params:get(i.."attack")
+    local steps = math.max(1, math.floor(att_ms / 10))
+    local dt = att_ms / steps / 1000
+    local start_vol = current_env[i]
+    local target_vol = params:get(i.."volume")
+    for step = 1, steps do
+      local t = step / steps
+      local new_vol = start_vol + (target_vol - start_vol) * t
+      current_env[i] = new_vol
+      engine.volume(i, math.pow(10, new_vol/20))
+      clock.sleep(dt)
+    end
+    current_env[i] = target_vol
+    engine.volume(i, math.pow(10, target_vol/20))
+  end)
+end
+
+local function envelope_release(i)
+  if envelope_threads[i] then clock.cancel(envelope_threads[i]) end
+  envelope_threads[i] = clock.run(function()
+    local rel_ms = params:get(i.."release")
+    local steps = math.max(1, math.floor(rel_ms / 10))
+    local dt = rel_ms / steps / 1000
+    local start_vol = current_env[i]
+    local target_vol = -60
+    for step = 1, steps do
+      local t = step / steps
+      local new_vol = start_vol + (target_vol - start_vol) * t
+      current_env[i] = new_vol
+      engine.volume(i, math.pow(10, new_vol/20))
+      clock.sleep(dt)
+    end
+    current_env[i] = target_vol
+    engine.volume(i, math.pow(10, target_vol/20))
+    engine.gate(i, 0)
+  end)
+end
+
 function midi_event(data)
   local msg = midi.to_msg(data)
   if msg.type == "note_on" then
@@ -251,7 +305,7 @@ function midi_event(data)
           end
           if #active_notes[i] == 0 then
             voice_active[i] = false
-            engine.gate(i, 0)
+            envelope_release(i)
           else
             local last_note = active_notes[i][#active_notes[i]]
             local ratio = math.pow(2, (last_note - 60) / 12)
@@ -268,6 +322,7 @@ function midi_event(data)
           engine.pitch(i, ratio)
           engine.seek(i, 0)
           engine.gate(i, 1)
+          envelope_attack(i)
         end
       end
     end
@@ -282,7 +337,7 @@ function midi_event(data)
         end
         if #active_notes[i] == 0 then
           voice_active[i] = false
-          engine.gate(i, 0)
+          envelope_release(i)
         else
           local last_note = active_notes[i][#active_notes[i]]
           local ratio = math.pow(2, (last_note - 60) / 12)
