@@ -2,7 +2,7 @@
 -- v. 20250212
 -- by @nzimas
 -- 
--- 7~voice granular synthesizer 
+-- Multitimbral granular synthesizer 
 -- Press K2 to randomize all voices
 -- Extensive config options in EDIT menu
 
