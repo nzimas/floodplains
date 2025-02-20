@@ -142,10 +142,18 @@ local function setup_ui_metro()
 end
 
 local function setup_params()
+  params:add_separator("MIDI")
+  params:add{ type = "number", id = "midi_device", name = "MIDI Device", min = 1, max = 16, default = 1,
+    action = function(value)
+      if midi_in then midi_in.event = nil end
+      midi_in = midi.connect(value)
+      midi_in.event = midi_event
+    end }
   params:add_separator("Samples & Voices")
   for i = 1, num_voices do
     params:add_file(i.."sample", i.." sample")
     params:set_action(i.."sample", function(file) engine.read(i, file) end)
+    params:add_number("midi_channel_"..i, "MIDI channel "..i, 1, 16, i)
     params:add_control(i.."playhead_rate", i.." playhead rate",
       controlspec.new(0, 4, "lin", 0.01, 1.0, "", 0.01/4))
     params:set_action(i.."playhead_rate", function(v) update_playhead(i) end)
@@ -203,10 +211,9 @@ local function setup_params()
         end
       end
     end)
-    params:add_number("midi_channel_"..i, "MIDI channel "..i, 1, 16, i)
     -- Attack and Release parameters (in ms)
-    params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
-    params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
+    -- params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
+    -- params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
   end
 
   params:add_separator("Polyphony")
@@ -246,14 +253,6 @@ local function setup_params()
   params:set_action("reverb_room", function(v) engine.reverb_room(v/100) end)
   params:add_taper("reverb_damp", "* damp", 0, 100, 50, 0, "%")
   params:set_action("reverb_damp", function(v) engine.reverb_damp(v/100) end)
-
-  params:add_separator("MIDI")
-  params:add{ type = "number", id = "midi_device", name = "MIDI Device", min = 1, max = 16, default = 1,
-    action = function(value)
-      if midi_in then midi_in.event = nil end
-      midi_in = midi.connect(value)
-      midi_in.event = midi_event
-    end }
 
   params:bang()
 end
