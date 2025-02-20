@@ -11,4 +11,6 @@ Short-press K2 to randomize the granular parameters of all voices or tweak them 
 ## Installation
 
 Install via maiden:
+```
 ;install https://github.com/nzimas/floodplains
+```
