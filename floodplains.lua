@@ -8,7 +8,6 @@
 
 engine.name = "Glut"
 
--- We use 5 main voices (indices 1–5) plus 2 auxiliary voices (6 and 7) for polyphony.
 local num_voices = 5
 
 -- Tables for the main voices (1–5)
@@ -154,6 +153,8 @@ local function setup_params()
     params:set_action(i.."playhead_direction", function(d) update_playhead(i) end)
     params:add_taper(i.."volume", i.." volume", -60, 20, 0, 0, "dB")
     params:set_action(i.."volume", function(v) engine.volume(i, math.pow(10, v/20)) end)
+    params:add_taper(i.."pan", i.." pan", -1, 1, 0, 0, "")
+    params:set_action(i.."pan", function(v) engine.pan(i, v) end)
     params:add_taper(i.."jitter", i.." jitter", 0, 2000, 0, 5, "ms")
     params:set_action(i.."jitter", function(val) engine.jitter(i, val/1000) end)
     params:add_taper(i.."size", i.." size", 1, 500, 100, 5, "ms")
@@ -247,7 +248,7 @@ local function setup_params()
   params:set_action("reverb_damp", function(v) engine.reverb_damp(v/100) end)
 
   params:add_separator("MIDI")
-  params:add{ type = "number", id = "midi_device", name = "MIDI Device", min = 1, max = 4, default = 1,
+  params:add{ type = "number", id = "midi_device", name = "MIDI Device", min = 1, max = 16, default = 1,
     action = function(value)
       if midi_in then midi_in.event = nil end
       midi_in = midi.connect(value)
@@ -298,6 +299,8 @@ local function envelope_attack(i)
     local dt = att_ms / steps / 1000
     local start_vol = current_env[i]
     local target_vol = params:get((i > num_voices) and params:get("polyphonic_voice").."volume" or (i.."volume"))
+    local target_pan = params:get((i > num_voices) and params:get("polyphonic_voice").."pan" or (i.."pan"))
+    engine.pan(i, target_pan)
     for step = 1, steps do
       local t = step / steps
       local new_vol = start_vol + (target_vol - start_vol) * t
@@ -355,6 +358,7 @@ function midi_event(data)
                 engine.seek(i, 0)
                 engine.gate(i, 1)
                 envelope_attack(i)
+                engine.pan(i, params:get(i.."pan"))
               else
                 engine.pitch(i, math.pow(2, (chord[1]-60)/12))
               end
@@ -393,6 +397,7 @@ function midi_event(data)
             else
               local last_note = active_notes[i][#active_notes[i]]
               engine.pitch(i, math.pow(2, (last_note-60)/12))
+              engine.pan(i, params:get(i.."pan"))
             end
           end
         end
