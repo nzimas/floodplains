@@ -212,8 +212,8 @@ local function setup_params()
       end
     end)
     -- Attack and Release parameters (in ms)
-    -- params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
-    -- params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
+    params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
+    params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
   end
 
   params:add_separator("Polyphony")
