@@ -7,6 +7,10 @@
 
 engine.name = "GlutXtd"
 
+-- We assume engine.filterCutoff and engine.filterRQ are defined by GlutXtd.
+local filterCutoff = engine.filterCutoff
+local filterRQ = engine.filterRQ
+
 local num_voices = 5
 
 -- Tables for the main voices (1–5)
@@ -48,7 +52,7 @@ for i = 1, num_voices do
   envelope_threads[i] = nil
   current_env[i] = -60  -- in dB
 end
-for i = 6,7 do
+for i = 6, 7 do
   envelope_threads[i] = nil
   current_env[i] = -60
 end
@@ -60,13 +64,13 @@ local positions = {}
 local top_y = 10
 local top_margin = math.floor((128 - (3 * square_size)) / 4)
 positions[1] = { x = top_margin, y = top_y }
-positions[2] = { x = top_margin*2 + square_size, y = top_y }
-positions[3] = { x = top_margin*3 + square_size*2, y = top_y }
+positions[2] = { x = top_margin * 2 + square_size, y = top_y }
+positions[3] = { x = top_margin * 3 + square_size * 2, y = top_y }
 -- Bottom row: voices 4–5
 local bottom_y = 40
 local bottom_margin = math.floor((128 - (2 * square_size)) / 3)
 positions[4] = { x = bottom_margin, y = bottom_y }
-positions[5] = { x = bottom_margin*2 + square_size, y = bottom_y }
+positions[5] = { x = bottom_margin * 2 + square_size, y = bottom_y }
 -- (Auxiliary voices 6 and 7 are not shown in the UI.)
 
 local function random_float(l, h)
@@ -88,20 +92,20 @@ local function smooth_transition(param_name, new_val, duration)
 end
 
 local function randomize_voice(i)
-  local transition_ms = g_transition_time_options[ params:get("transition_time") ]
-  local morph_ms = g_morph_time_options[ params:get("morph_time") ]
+  local transition_ms = g_transition_time_options[params:get("transition_time")]
+  local morph_ms = g_morph_time_options[params:get("morph_time")]
   local actual_ms = math.min(morph_ms, transition_ms)
   local morph_duration = actual_ms / 1000
 
-  local new_jitter  = random_float(params:get("min_jitter"),  params:get("max_jitter"))
-  local new_size    = random_float(params:get("min_size"),    params:get("max_size"))
+  local new_jitter  = random_float(params:get("min_jitter"), params:get("max_jitter"))
+  local new_size    = random_float(params:get("min_size"), params:get("max_size"))
   local new_density = random_float(params:get("min_density"), params:get("max_density"))
-  local new_spread  = random_float(params:get("min_spread"),  params:get("max_spread"))
+  local new_spread  = random_float(params:get("min_spread"), params:get("max_spread"))
 
-  smooth_transition(i.."jitter",  new_jitter,  morph_duration)
-  smooth_transition(i.."size",    new_size,    morph_duration)
+  smooth_transition(i.."jitter", new_jitter, morph_duration)
+  smooth_transition(i.."size", new_size, morph_duration)
   smooth_transition(i.."density", new_density, morph_duration)
-  smooth_transition(i.."spread",  new_spread,  morph_duration)
+  smooth_transition(i.."spread", new_spread, morph_duration)
 end
 
 local function randomize_all()
@@ -112,7 +116,7 @@ end
 
 local function setup_ui_metro()
   ui_metro = metro.init()
-  ui_metro.time = 1/15
+  ui_metro.time = 1 / 15
   ui_metro.event = function() redraw() end
   ui_metro:start()
 end
@@ -120,7 +124,8 @@ end
 local function setup_params()
   params:add_separator("MIDI")
   params:add{
-    type = "number", id = "midi_device", name = "MIDI Device", min = 1, max = 16, default = 1,
+    type = "number", id = "midi_device", name = "MIDI Device",
+    min = 1, max = 16, default = 1,
     action = function(value)
       if midi_in then midi_in.event = nil end
       midi_in = midi.connect(value)
@@ -138,26 +143,26 @@ local function setup_params()
         engine.read(7, file)
       end
     end)
-    params:add_number("midi_channel_"..i, "MIDI channel "..i, 1, 16, i)
+    params:add_number("midi_channel_" .. i, "MIDI channel " .. i, 1, 16, i)
     -- Granular parameters:
     params:add_taper(i.."volume", i.." volume", -60, 20, 0, 0, "dB")
-    params:set_action(i.."volume", function(v) engine.volume(i, math.pow(10, v/20)) end)
+    params:set_action(i.."volume", function(v) engine.volume(i, math.pow(10, v / 20)) end)
     params:add_taper(i.."pan", i.." pan", -1, 1, 0, 0, "")
     params:set_action(i.."pan", function(v) engine.pan(i, v) end)
     params:add_taper(i.."jitter", i.." jitter", 0, 2000, 0, 5, "ms")
-    params:set_action(i.."jitter", function(val) engine.jitter(i, val/1000) end)
+    params:set_action(i.."jitter", function(val) engine.jitter(i, val / 1000) end)
     params:add_taper(i.."size", i.." size", 1, 500, 100, 5, "ms")
-    params:set_action(i.."size", function(val) engine.size(i, val/1000) end)
+    params:set_action(i.."size", function(val) engine.size(i, val / 1000) end)
     params:add_taper(i.."density", i.." density", 0, 512, 20, 6, "hz")
     params:set_action(i.."density", function(val) engine.density(i, val) end)
     params:add_taper(i.."spread", i.." spread", 0, 100, 0, 0, "%")
-    params:set_action(i.."spread", function(val) engine.spread(i, val/100) end)
+    params:set_action(i.."spread", function(val) engine.spread(i, val / 100) end)
     params:add_taper(i.."fade", i.." att/dec", 1, 9000, 1000, 3, "ms")
-    params:set_action(i.."fade", function(val) engine.envscale(i, val/1000) end)
+    params:set_action(i.."fade", function(val) engine.envscale(i, val / 1000) end)
     params:add_control(i.."seek", i.." seek",
-      controlspec.new(0, 100, "lin", 0.1, 0, "%", 0.1/100))
-    params:set_action(i.."seek", function(val) engine.seek(i, val/100) end)
-    params:add_option(i.."random_seek", i.." randomize seek", {"off","on"}, 1)
+      controlspec.new(0, 100, "lin", 0.1, 0, "%", 0.1 / 100))
+    params:set_action(i.."seek", function(val) engine.seek(i, val / 100) end)
+    params:add_option(i.."random_seek", i.." randomize seek", {"off", "on"}, 1)
     params:add_control(i.."random_seek_freq_min", i.." rnd seek freq min",
       controlspec.new(100, 30000, "lin", 100, 500, "ms", 0.00333))
     params:add_control(i.."random_seek_freq_max", i.." rnd seek freq max",
@@ -175,12 +180,12 @@ local function setup_params()
         if random_seek_metros[i] == nil then
           random_seek_metros[i] = metro.init()
           random_seek_metros[i].event = function()
-            params:set(i.."seek", math.random()*100)
+            params:set(i.."seek", math.random() * 100)
             local tmin = params:get(i.."random_seek_freq_min")
             local tmax = params:get(i.."random_seek_freq_max")
             if tmax < tmin then tmin, tmax = tmax, tmin end
             local next_interval = math.random(tmin, tmax)
-            random_seek_metros[i].time = next_interval/1000
+            random_seek_metros[i].time = next_interval / 1000
             random_seek_metros[i]:start()
           end
         end
@@ -195,10 +200,17 @@ local function setup_params()
     -- Attack and Release parameters (in ms)
     params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
     params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
+    -- NEW: Filter subsection for voice i:
+    params:add_separator("Voice " .. i .. " Filter")
+    params:add_control(i.."filterCutoff", i.." filter cutoff",
+      controlspec.new(20, 20000, "lin", 0.1, 8000, "Hz"))
+    params:set_action(i.."filterCutoff", function(val) filterCutoff(i, val) end)
+    params:add_taper(i.."filterRQ", i.." filter resonance", 0.1, 2, 0.5, 0.01, "Q")
+    params:set_action(i.."filterRQ", function(val) filterRQ(i, val) end)
   end
 
   params:add_separator("Polyphony")
-  params:add_option("polyphonic_voice", "polyphonic voice", {"1","2","3","4","5"}, 1)
+  params:add_option("polyphonic_voice", "polyphonic voice", {"1", "2", "3", "4", "5"}, 1)
 
   params:add_separator("Transition")
   params:add_option("transition_time", "transition time (ms)",
@@ -229,11 +241,11 @@ local function setup_params()
 
   params:add_separator("Reverb")
   params:add_taper("reverb_mix", "* mix", 0, 100, 50, 0, "%")
-  params:set_action("reverb_mix", function(v) engine.reverb_mix(v/100) end)
+  params:set_action("reverb_mix", function(v) engine.reverb_mix(v / 100) end)
   params:add_taper("reverb_room", "* room", 0, 100, 50, 0, "%")
-  params:set_action("reverb_room", function(v) engine.reverb_room(v/100) end)
+  params:set_action("reverb_room", function(v) engine.reverb_room(v / 100) end)
   params:add_taper("reverb_damp", "* damp", 0, 100, 50, 0, "%")
-  params:set_action("reverb_damp", function(v) engine.reverb_damp(v/100) end)
+  params:set_action("reverb_damp", function(v) engine.reverb_damp(v / 100) end)
 
   params:bang()
 end
@@ -257,18 +269,18 @@ local midi_in
 local function get_attack_time(i)
   if i > num_voices then
     local poly = params:get("polyphonic_voice")
-    return params:get(poly.."attack")
+    return params:get(poly .. "attack")
   else
-    return params:get(i.."attack")
+    return params:get(i .. "attack")
   end
 end
 
 local function get_release_time(i)
   if i > num_voices then
     local poly = params:get("polyphonic_voice")
-    return params:get(poly.."release")
+    return params:get(poly .. "release")
   else
-    return params:get(i.."release")
+    return params:get(i .. "release")
   end
 end
 
@@ -280,18 +292,18 @@ local function envelope_attack(i)
     local steps = math.max(1, math.floor(att_ms / 10))
     local dt = att_ms / steps / 1000
     local start_vol = current_env[i]
-    local target_vol = params:get((i > num_voices) and params:get("polyphonic_voice").."volume" or (i.."volume"))
-    local target_pan = params:get((i > num_voices) and params:get("polyphonic_voice").."pan" or (i.."pan"))
+    local target_vol = params:get((i > num_voices) and params:get("polyphonic_voice") .. "volume" or (i .. "volume"))
+    local target_pan = params:get((i > num_voices) and params:get("polyphonic_voice") .. "pan" or (i .. "pan"))
     engine.pan(i, target_pan)
     for step = 1, steps do
       local t = step / steps
       local new_vol = start_vol + (target_vol - start_vol) * t
       current_env[i] = new_vol
-      engine.volume(i, math.pow(10, new_vol/20))
+      engine.volume(i, math.pow(10, new_vol / 20))
       clock.sleep(dt)
     end
     current_env[i] = target_vol
-    engine.volume(i, math.pow(10, target_vol/20))
+    engine.volume(i, math.pow(10, target_vol / 20))
   end)
 end
 
@@ -307,11 +319,11 @@ local function envelope_release(i)
       local t = step / steps
       local new_vol = start_vol + (target_vol - start_vol) * t
       current_env[i] = new_vol
-      engine.volume(i, math.pow(10, new_vol/20))
+      engine.volume(i, math.pow(10, new_vol / 20))
       clock.sleep(dt)
     end
     current_env[i] = target_vol
-    engine.volume(i, math.pow(10, target_vol/20))
+    engine.volume(i, math.pow(10, target_vol / 20))
     engine.gate(i, 0)
   end)
 end
@@ -323,7 +335,7 @@ function midi_event(data)
     if msg.vel == 0 then
       -- treat note_on with vel==0 as note_off
       for i = 1, num_voices do
-        if msg.ch == params:get("midi_channel_"..i) then
+        if msg.ch == params:get("midi_channel_" .. i) then
           if i == params:get("polyphonic_voice") then
             local chord = active_notes[i]
             for j, n in ipairs(chord) do
@@ -336,45 +348,45 @@ function midi_event(data)
               engine.gate(7, 0)
             else
               if msg.note == chord[1] then
-                engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+                engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
                 engine.gate(i, 1)
                 envelope_attack(i)
-                engine.pan(i, params:get(i.."pan"))
+                engine.pan(i, params:get(i .. "pan"))
               else
-                engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+                engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
               end
               if #chord >= 2 then
                 if #chord == 2 then
-                  engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                  engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
                   engine.gate(6, 1)
                   envelope_attack(6)
-                  engine.jitter(6, params:get(i.."jitter")/1000)
-                  engine.size(6, params:get(i.."size")/1000)
-                  engine.density(6, params:get(i.."density"))
-                  engine.spread(6, params:get(i.."spread")/100)
-                  engine.envscale(6, params:get(i.."fade")/1000)
-                  engine.seek(6, params:get(i.."seek")/100)
-                  engine.pan(6, params:get(i.."pan"))
+                  engine.jitter(6, params:get(i .. "jitter") / 1000)
+                  engine.size(6, params:get(i .. "size") / 1000)
+                  engine.density(6, params:get(i .. "density"))
+                  engine.spread(6, params:get(i .. "spread") / 100)
+                  engine.envscale(6, params:get(i .. "fade") / 1000)
+                  engine.seek(6, params:get(i .. "seek") / 100)
+                  engine.pan(6, params:get(i .. "pan"))
                 else
-                  engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                  engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
                 end
               else
                 engine.gate(6, 0)
               end
               if #chord >= 3 then
                 if #chord == 3 then
-                  engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                  engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
                   engine.gate(7, 1)
                   envelope_attack(7)
-                  engine.jitter(7, params:get(i.."jitter")/1000)
-                  engine.size(7, params:get(i.."size")/1000)
-                  engine.density(7, params:get(i.."density"))
-                  engine.spread(7, params:get(i.."spread")/100)
-                  engine.envscale(7, params:get(i.."fade")/1000)
-                  engine.seek(7, params:get(i.."seek")/100)
-                  engine.pan(7, params:get(i.."pan"))
+                  engine.jitter(7, params:get(i .. "jitter") / 1000)
+                  engine.size(7, params:get(i .. "size") / 1000)
+                  engine.density(7, params:get(i .. "density"))
+                  engine.spread(7, params:get(i .. "spread") / 100)
+                  engine.envscale(7, params:get(i .. "fade") / 1000)
+                  engine.seek(7, params:get(i .. "seek") / 100)
+                  engine.pan(7, params:get(i .. "pan"))
                 else
-                  engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                  engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
                 end
               else
                 engine.gate(7, 0)
@@ -400,59 +412,59 @@ function midi_event(data)
               envelope_release(i)
             else
               local last_note = active_notes[i][#active_notes[i]]
-              engine.pitch(i, math.pow(2, (last_note-60)/12))
-              engine.pan(i, params:get(i.."pan"))
+              engine.pitch(i, math.pow(2, (last_note - 60) / 12))
+              engine.pan(i, params:get(i .. "pan"))
             end
           end
         end
       end
     else
       for i = 1, num_voices do
-        if msg.ch == params:get("midi_channel_"..i) then
+        if msg.ch == params:get("midi_channel_" .. i) then
           if i == params:get("polyphonic_voice") then
             local chord = active_notes[i]
             table.insert(chord, msg.note)
             voice_active[i] = true
             -- Do not re-read the sample so the playhead isn't reset.
             if #chord == 1 then
-              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+              engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
               engine.gate(i, 1)
               envelope_attack(i)
             else
-              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+              engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
             end
             if #chord >= 2 then
               if #chord == 2 then
-                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
                 engine.gate(6, 1)
                 envelope_attack(6)
-                engine.jitter(6, params:get(i.."jitter")/1000)
-                engine.size(6, params:get(i.."size")/1000)
-                engine.density(6, params:get(i.."density"))
-                engine.spread(6, params:get(i.."spread")/100)
-                engine.envscale(6, params:get(i.."fade")/1000)
-                engine.seek(6, params:get(i.."seek")/100)
-                engine.pan(6, params:get(i.."pan"))
+                engine.jitter(6, params:get(i .. "jitter") / 1000)
+                engine.size(6, params:get(i .. "size") / 1000)
+                engine.density(6, params:get(i .. "density"))
+                engine.spread(6, params:get(i .. "spread") / 100)
+                engine.envscale(6, params:get(i .. "fade") / 1000)
+                engine.seek(6, params:get(i .. "seek") / 100)
+                engine.pan(6, params:get(i .. "pan"))
               else
-                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
               end
             else
               engine.gate(6, 0)
             end
             if #chord >= 3 then
               if #chord == 3 then
-                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
                 engine.gate(7, 1)
                 envelope_attack(7)
-                engine.jitter(7, params:get(i.."jitter")/1000)
-                engine.size(7, params:get(i.."size")/1000)
-                engine.density(7, params:get(i.."density"))
-                engine.spread(7, params:get(i.."spread")/100)
-                engine.envscale(7, params:get(i.."fade")/1000)
-                engine.seek(7, params:get(i.."seek")/100)
-                engine.pan(7, params:get(i.."pan"))
+                engine.jitter(7, params:get(i .. "jitter") / 1000)
+                engine.size(7, params:get(i .. "size") / 1000)
+                engine.density(7, params:get(i .. "density"))
+                engine.spread(7, params:get(i .. "spread") / 100)
+                engine.envscale(7, params:get(i .. "fade") / 1000)
+                engine.seek(7, params:get(i .. "seek") / 100)
+                engine.pan(7, params:get(i .. "pan"))
               else
-                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
               end
             else
               engine.gate(7, 0)
@@ -471,7 +483,7 @@ function midi_event(data)
           else
             voice_active[i] = true
             table.insert(active_notes[i], msg.note)
-            engine.pitch(i, math.pow(2, (msg.note-60)/12))
+            engine.pitch(i, math.pow(2, (msg.note - 60) / 12))
             engine.gate(i, 1)
             envelope_attack(i)
           end
@@ -480,7 +492,7 @@ function midi_event(data)
     end
   elseif msg.type == "note_off" then
     for i = 1, num_voices do
-      if msg.ch == params:get("midi_channel_"..i) then
+      if msg.ch == params:get("midi_channel_" .. i) then
         if i == params:get("polyphonic_voice") then
           local chord = active_notes[i]
           for j, n in ipairs(chord) do
@@ -493,44 +505,44 @@ function midi_event(data)
             engine.gate(7, 0)
           else
             if msg.note == chord[1] then
-              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+              engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
               engine.gate(i, 1)
               envelope_attack(i)
             else
-              engine.pitch(i, math.pow(2, (chord[1]-60)/12))
+              engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
             end
             if #chord >= 2 then
               if #chord == 2 then
-                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
                 engine.gate(6, 1)
                 envelope_attack(6)
-                engine.jitter(6, params:get(i.."jitter")/1000)
-                engine.size(6, params:get(i.."size")/1000)
-                engine.density(6, params:get(i.."density"))
-                engine.spread(6, params:get(i.."spread")/100)
-                engine.envscale(6, params:get(i.."fade")/1000)
-                engine.seek(6, params:get(i.."seek")/100)
-                engine.pan(6, params:get(i.."pan"))
+                engine.jitter(6, params:get(i .. "jitter") / 1000)
+                engine.size(6, params:get(i .. "size") / 1000)
+                engine.density(6, params:get(i .. "density"))
+                engine.spread(6, params:get(i .. "spread") / 100)
+                engine.envscale(6, params:get(i .. "fade") / 1000)
+                engine.seek(6, params:get(i .. "seek") / 100)
+                engine.pan(6, params:get(i .. "pan"))
               else
-                engine.pitch(6, math.pow(2, (chord[2]-60)/12))
+                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
               end
             else
               engine.gate(6, 0)
             end
             if #chord >= 3 then
               if #chord == 3 then
-                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
                 engine.gate(7, 1)
                 envelope_attack(7)
-                engine.jitter(7, params:get(i.."jitter")/1000)
-                engine.size(7, params:get(i.."size")/1000)
-                engine.density(7, params:get(i.."density"))
-                engine.spread(7, params:get(i.."spread")/100)
-                engine.envscale(7, params:get(i.."fade")/1000)
-                engine.seek(7, params:get(i.."seek")/100)
-                engine.pan(7, params:get(i.."pan"))
+                engine.jitter(7, params:get(i .. "jitter") / 1000)
+                engine.size(7, params:get(i .. "size") / 1000)
+                engine.density(7, params:get(i .. "density"))
+                engine.spread(7, params:get(i .. "spread") / 100)
+                engine.envscale(7, params:get(i .. "fade") / 1000)
+                engine.seek(7, params:get(i .. "seek") / 100)
+                engine.pan(7, params:get(i .. "pan"))
               else
-                engine.pitch(7, math.pow(2, (chord[3]-60)/12))
+                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
               end
             else
               engine.gate(7, 0)
@@ -545,7 +557,7 @@ function midi_event(data)
             envelope_release(i)
           else
             local last_note = active_notes[i][#active_notes[i]]
-            engine.pitch(i, math.pow(2, (last_note-60)/12))
+            engine.pitch(i, math.pow(2, (last_note - 60) / 12))
           end
         end
       end
@@ -568,7 +580,7 @@ function key(n, z)
         local dt = util.time() - key1_timer
         if dt >= 1 then
           randomize_voice(1)
-          params:set("1seek", math.random()*100)
+          params:set("1seek", math.random() * 100)
         end
       end
     end
@@ -582,10 +594,10 @@ function key(n, z)
         local dt = util.time() - key2_timer
         if dt >= 1 then
           randomize_voice(4)
-          params:set("4seek", math.random()*100)
+          params:set("4seek", math.random() * 100)
         else
           randomize_voice(2)
-          params:set("2seek", math.random()*100)
+          params:set("2seek", math.random() * 100)
         end
       end
     end
@@ -599,10 +611,10 @@ function key(n, z)
         local dt = util.time() - key3_timer
         if dt >= 1 then
           randomize_voice(5)
-          params:set("5seek", math.random()*100)
+          params:set("5seek", math.random() * 100)
         else
           randomize_voice(3)
-          params:set("3seek", math.random()*100)
+          params:set("3seek", math.random() * 100)
         end
       end
     end
