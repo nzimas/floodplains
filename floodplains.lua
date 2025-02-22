@@ -1,12 +1,11 @@
 -- Floodplains
--- v. 20250221
+-- v. 20250212
 -- by @nzimas
 -- 
 -- Multitimbral granular synthesizer 
--- Press K2 to randomize all voices
 -- Extensive config options in EDIT menu
 
-engine.name = "Glut"
+engine.name = "GlutXtd"
 
 local num_voices = 5
 
@@ -34,8 +33,13 @@ for t = 1500, 90000, 500 do table.insert(g_transition_time_options, t) end
 local g_morph_time_options = {}
 for t = 0, 90000, 500 do table.insert(g_morph_time_options, t) end
 
+-- Key timing variables for K1, K2, and K3:
+local key1_hold = false
+local key1_timer = 0
 local key2_hold = false
 local key2_timer = 0
+local key3_hold = false
+local key3_timer = 0
 
 -- Envelope globals per voice (we extend these for auxiliary voices too)
 local envelope_threads = {}
@@ -339,13 +343,11 @@ function midi_event(data)
               else
                 engine.pitch(i, math.pow(2, (chord[1]-60)/12))
               end
-              -- Update aux voice 6 if chord has at least 2 notes:
               if #chord >= 2 then
                 if #chord == 2 then
                   engine.pitch(6, math.pow(2, (chord[2]-60)/12))
                   engine.gate(6, 1)
                   envelope_attack(6)
-                  -- Inherit granular parameters from main polyphonic voice i:
                   engine.jitter(6, params:get(i.."jitter")/1000)
                   engine.size(6, params:get(i.."size")/1000)
                   engine.density(6, params:get(i.."density"))
@@ -359,7 +361,6 @@ function midi_event(data)
               else
                 engine.gate(6, 0)
               end
-              -- Update aux voice 7 if chord has at least 3 notes:
               if #chord >= 3 then
                 if #chord == 3 then
                   engine.pitch(7, math.pow(2, (chord[3]-60)/12))
@@ -552,16 +553,56 @@ function midi_event(data)
   end
 end
 
+-- New key handling:
+-- K1: Long-press randomizes Voice 1.
+-- K2: Short-press randomizes Voice 2; Long-press randomizes Voice 4.
+-- K3: Short-press randomizes Voice 3; Long-press randomizes Voice 5.
 function key(n, z)
-  if n == 2 then
+  if n == 1 then
+    if z == 1 then
+      key1_hold = true
+      key1_timer = util.time()
+    else
+      if key1_hold then
+        key1_hold = false
+        local dt = util.time() - key1_timer
+        if dt >= 1 then
+          randomize_voice(1)
+          params:set("1seek", math.random()*100)
+        end
+      end
+    end
+  elseif n == 2 then
     if z == 1 then
       key2_hold = true
       key2_timer = util.time()
     else
       if key2_hold then
         key2_hold = false
-        if util.time() - key2_timer < 1 then
-          randomize_all()
+        local dt = util.time() - key2_timer
+        if dt >= 1 then
+          randomize_voice(4)
+          params:set("4seek", math.random()*100)
+        else
+          randomize_voice(2)
+          params:set("2seek", math.random()*100)
+        end
+      end
+    end
+  elseif n == 3 then
+    if z == 1 then
+      key3_hold = true
+      key3_timer = util.time()
+    else
+      if key3_hold then
+        key3_hold = false
+        local dt = util.time() - key3_timer
+        if dt >= 1 then
+          randomize_voice(5)
+          params:set("5seek", math.random()*100)
+        else
+          randomize_voice(3)
+          params:set("3seek", math.random()*100)
         end
       end
     end
