@@ -1,10 +1,9 @@
 # floodplains
 
-Multitimbral, MIDI-controllable granular synthesizer for Norns.
+15-voice Multitimbral, MIDI-controllable granular synthesizer for Norns.
 
-5 main voices with assignable samples:
- - 4 monophonic voices
- - 1 selectable polyphonic voice
+5 polyphonic voices with assignable samples:
+ - 3-note polyphony per voice
  - MIDI channel per voice
 
 Short-press K2 to randomize the granular parameters of all voices or tweak them manually in the EDIT menu.
