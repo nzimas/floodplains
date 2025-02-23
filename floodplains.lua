@@ -189,6 +189,8 @@ local function setup_params()
     -- Attack and Release parameters (in ms)
     params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
     params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
+    -- NEW: Random poly panning parameter (if "on", aux voices will be panned oppositely; if "off", they copy the main voice pan)
+    params:add_option(i.."random_poly_pan", i.." random poly pan", {"off", "on"}, 2)
     -- NEW: Filter subsection for voice i:
     params:add_separator("Voice " .. i .. " Filter")
     params:add_control(i.."filterCutoff", i.." filter cutoff",
@@ -378,21 +380,24 @@ function midi_event(data)
               engine.gate(aux2, 0)
             end
             if #chord >= 2 then
-              if math.random() < 0.5 then
-                engine.pan(aux1, -1)
-                engine.pan(aux2, 1)
+              if params:get(i.."random_poly_pan") == 2 then
+                if math.random() < 0.5 then
+                  engine.pan(aux1, -1)
+                  engine.pan(aux2, 1)
+                else
+                  engine.pan(aux1, 1)
+                  engine.pan(aux2, -1)
+                end
               else
-                engine.pan(aux1, 1)
-                engine.pan(aux2, -1)
+                local mainPan = params:get(i.."pan")
+                engine.pan(aux1, mainPan)
+                engine.pan(aux2, mainPan)
               end
             end
-            if #chord >= 2 then randomize_voice(aux1) end
-            if #chord >= 3 then randomize_voice(aux2) end
           end
         end
       end
     else
-      -- note_on with vel > 0
       for i = 1, num_voices do
         if msg.ch == params:get("midi_channel_" .. i) then
           local chord = active_notes[i]
@@ -445,16 +450,20 @@ function midi_event(data)
             engine.gate(aux2, 0)
           end
           if #chord >= 2 then
-            if math.random() < 0.5 then
-              engine.pan(aux1, -1)
-              engine.pan(aux2, 1)
+            if params:get(i.."random_poly_pan") == 2 then
+              if math.random() < 0.5 then
+                engine.pan(aux1, -1)
+                engine.pan(aux2, 1)
+              else
+                engine.pan(aux1, 1)
+                engine.pan(aux2, -1)
+              end
             else
-              engine.pan(aux1, 1)
-              engine.pan(aux2, -1)
+              local mainPan = params:get(i.."pan")
+              engine.pan(aux1, mainPan)
+              engine.pan(aux2, mainPan)
             end
           end
-          if #chord >= 2 then randomize_voice(aux1) end
-          if #chord >= 3 then randomize_voice(aux2) end
         end
       end
     end
@@ -518,6 +527,21 @@ function midi_event(data)
             end
           else
             engine.gate(aux2, 0)
+          end
+          if #chord >= 2 then
+            if params:get(i.."random_poly_pan") == 2 then
+              if math.random() < 0.5 then
+                engine.pan(aux1, -1)
+                engine.pan(aux2, 1)
+              else
+                engine.pan(aux1, 1)
+                engine.pan(aux2, -1)
+              end
+            else
+              local mainPan = params:get(i.."pan")
+              engine.pan(aux1, mainPan)
+              engine.pan(aux2, mainPan)
+            end
           end
         end
       end
