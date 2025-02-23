@@ -7,7 +7,8 @@
 
 engine.name = "GlutXtd"
 
-local num_voices = 5
+local num_voices = 5  -- main voices 1..5
+local num_aux = 10    -- aux voices 6..15 (2 per main voice)
 
 -- Tables for the main voices (1–5)
 local voice_active = {}       -- whether the main voice is active
@@ -20,9 +21,10 @@ for i = 1, num_voices do
   random_seek_metros[i] = nil
 end
 
--- Initialize auxiliary voices (indices 6 and 7)
-voice_active[6] = false
-voice_active[7] = false
+-- Initialize aux voices (voices 6 to 15)
+for i = num_voices+1, num_voices+num_aux do
+  voice_active[i] = false
+end
 
 local ui_metro
 
@@ -37,16 +39,12 @@ local key2_timer = 0
 local key3_hold = false
 local key3_timer = 0
 
--- Envelope globals per voice (we extend these for auxiliary voices too)
+-- Envelope globals per voice (we extend these for aux voices too)
 local envelope_threads = {}
 local current_env = {}
-for i = 1, num_voices do
+for i = 1, num_voices+num_aux do
   envelope_threads[i] = nil
   current_env[i] = -60  -- in dB
-end
-for i = 6, 7 do
-  envelope_threads[i] = nil
-  current_env[i] = -60
 end
 
 -- UI squares: main voices (1–5) are displayed in 2 rows.
@@ -63,7 +61,7 @@ local bottom_y = 40
 local bottom_margin = math.floor((128 - (2 * square_size)) / 3)
 positions[4] = { x = bottom_margin, y = bottom_y }
 positions[5] = { x = bottom_margin * 2 + square_size, y = bottom_y }
--- (Auxiliary voices 6 and 7 are not shown in the UI.)
+-- (Aux voices 6–15 are not shown in the UI.)
 
 local function random_float(l, h)
   return l + math.random() * (h - l)
@@ -122,16 +120,17 @@ local function setup_params()
       midi_in.event = midi_event
     end
   }
+  
   params:add_separator("Samples & Voices")
   for i = 1, num_voices do
     params:add_file(i.."sample", i.." sample")
-    -- When loading a sample for a voice, if that voice is the polyphonic one, also load for aux voices 6 and 7.
+    -- When loading a sample for a main voice, also load for its aux voices.
     params:set_action(i.."sample", function(file)
       engine.read(i, file)
-      if params:get("polyphonic_voice") == i then
-        engine.read(6, file)
-        engine.read(7, file)
-      end
+      local aux1 = 2 * i + 4
+      local aux2 = 2 * i + 5
+      engine.read(aux1, file)
+      engine.read(aux2, file)
     end)
     params:add_number("midi_channel_" .. i, "MIDI channel " .. i, 1, 16, i)
     -- Granular parameters:
@@ -196,32 +195,20 @@ local function setup_params()
       controlspec.new(20, 20000, "lin", 0.1, 8000, "Hz"))
     params:set_action(i.."filterCutoff", function(val)
       engine.filterCutoff(i, val)
-      if params:get("polyphonic_voice") == i then
-        engine.filterCutoff(6, val)
-        engine.filterCutoff(7, val)
-      end
+      local aux1 = 2 * i + 4
+      local aux2 = 2 * i + 5
+      engine.filterCutoff(aux1, val)
+      engine.filterCutoff(aux2, val)
     end)
     params:add_taper(i.."filterRQ", i.." filter resonance", 0.1, 2, 0.5, 0.01, "Q")
     params:set_action(i.."filterRQ", function(val)
       engine.filterRQ(i, val)
-      if params:get("polyphonic_voice") == i then
-        engine.filterRQ(6, val)
-        engine.filterRQ(7, val)
-      end
+      local aux1 = 2 * i + 4
+      local aux2 = 2 * i + 5
+      engine.filterRQ(aux1, val)
+      engine.filterRQ(aux2, val)
     end)
   end
-
-  params:add_separator("Polyphony")
-  params:add_option("polyphonic_voice", "polyphonic voice", {"1", "2", "3", "4", "5"}, 1)
-  params:set_action("polyphonic_voice", function(value)
-    local poly = value
-    local cutoff = params:get(poly .. "filterCutoff")
-    local rq = params:get(poly .. "filterRQ")
-    engine.filterCutoff(6, cutoff)
-    engine.filterCutoff(7, cutoff)
-    engine.filterRQ(6, rq)
-    engine.filterRQ(7, rq)
-  end)
 
   params:add_separator("Transition")
   params:add_option("morph_time", "morph time (ms)",
@@ -250,24 +237,22 @@ end
 
 local function setup_engine()
   for i = 1, num_voices do
-    -- Disable automatic playhead advancement by forcing speed to 0.
     engine.gate(i, 0)
     engine.speed(i, 0)
   end
-  -- Also set auxiliary voices’ speed to 0 for polyphony.
-  engine.gate(6, 0)
-  engine.speed(6, 0)
-  engine.gate(7, 0)
-  engine.speed(7, 0)
+  for i = num_voices+1, num_voices+num_aux do
+    engine.gate(i, 0)
+    engine.speed(i, 0)
+  end
 end
 
 local midi_in
 
--- The envelope routines now use the polyphonic voice's envelope times for auxiliary voices.
+-- For aux voices, use the envelope times of their main voice.
 local function get_attack_time(i)
   if i > num_voices then
-    local poly = params:get("polyphonic_voice")
-    return params:get(poly .. "attack")
+    local main = math.floor((i - 4) / 2)
+    return params:get(main .. "attack")
   else
     return params:get(i .. "attack")
   end
@@ -275,8 +260,8 @@ end
 
 local function get_release_time(i)
   if i > num_voices then
-    local poly = params:get("polyphonic_voice")
-    return params:get(poly .. "release")
+    local main = math.floor((i - 4) / 2)
+    return params:get(main .. "release")
   else
     return params:get(i .. "release")
   end
@@ -290,8 +275,8 @@ local function envelope_attack(i)
     local steps = math.max(1, math.floor(att_ms / 10))
     local dt = att_ms / steps / 1000
     local start_vol = current_env[i]
-    local target_vol = params:get((i > num_voices) and params:get("polyphonic_voice") .. "volume" or (i .. "volume"))
-    local target_pan = params:get((i > num_voices) and params:get("polyphonic_voice") .. "pan" or (i .. "pan"))
+    local target_vol = (i > num_voices) and params:get(math.floor((i - 4) / 2) .. "volume") or params:get(i .. "volume")
+    local target_pan = (i > num_voices) and params:get(math.floor((i - 4) / 2) .. "pan") or params:get(i .. "pan")
     engine.pan(i, target_pan)
     for step = 1, steps do
       local t = step / steps
@@ -326,7 +311,7 @@ local function envelope_release(i)
   end)
 end
 
--- MIDI event handler
+-- MIDI event handler: every main voice is treated as polyphonic.
 function midi_event(data)
   local msg = midi.to_msg(data)
   if msg.type == "note_on" then
@@ -334,164 +319,6 @@ function midi_event(data)
       -- treat note_on with vel==0 as note_off
       for i = 1, num_voices do
         if msg.ch == params:get("midi_channel_" .. i) then
-          if i == params:get("polyphonic_voice") then
-            local chord = active_notes[i]
-            for j, n in ipairs(chord) do
-              if n == msg.note then table.remove(chord, j) break end
-            end
-            if #chord == 0 then
-              voice_active[i] = false
-              envelope_release(i)
-              engine.gate(6, 0)
-              engine.gate(7, 0)
-            else
-              if msg.note == chord[1] then
-                engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
-                engine.gate(i, 1)
-                envelope_attack(i)
-                engine.pan(i, params:get(i .. "pan"))
-              else
-                engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
-              end
-              if #chord >= 2 then
-                if #chord == 2 then
-                  engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
-                  engine.gate(6, 1)
-                  envelope_attack(6)
-                  engine.jitter(6, params:get(i .. "jitter") / 1000)
-                  engine.size(6, params:get(i .. "size") / 1000)
-                  engine.density(6, params:get(i .. "density"))
-                  engine.spread(6, params:get(i .. "spread") / 100)
-                  engine.envscale(6, params:get(i .. "fade") / 1000)
-                  engine.seek(6, params:get(i .. "seek") / 100)
-                  engine.pan(6, params:get(i .. "pan"))
-                else
-                  engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
-                end
-              else
-                engine.gate(6, 0)
-              end
-              if #chord >= 3 then
-                if #chord == 3 then
-                  engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
-                  engine.gate(7, 1)
-                  envelope_attack(7)
-                  engine.jitter(7, params:get(i .. "jitter") / 1000)
-                  engine.size(7, params:get(i .. "size") / 1000)
-                  engine.density(7, params:get(i .. "density"))
-                  engine.spread(7, params:get(i .. "spread") / 100)
-                  engine.envscale(7, params:get(i .. "fade") / 1000)
-                  engine.seek(7, params:get(i .. "seek") / 100)
-                  engine.pan(7, params:get(i .. "pan"))
-                else
-                  engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
-                end
-              else
-                engine.gate(7, 0)
-              end
-              if #chord >= 2 then
-                if math.random() < 0.5 then
-                  engine.pan(6, -1)
-                  engine.pan(7, 1)
-                else
-                  engine.pan(6, 1)
-                  engine.pan(7, -1)
-                end
-              end
-              if #chord >= 2 then randomize_voice(6) end
-              if #chord >= 3 then randomize_voice(7) end
-            end
-          else
-            for j, n in ipairs(active_notes[i]) do
-              if n == msg.note then table.remove(active_notes[i], j) break end
-            end
-            if #active_notes[i] == 0 then
-              voice_active[i] = false
-              envelope_release(i)
-            else
-              local last_note = active_notes[i][#active_notes[i]]
-              engine.pitch(i, math.pow(2, (last_note - 60) / 12))
-              engine.pan(i, params:get(i .. "pan"))
-            end
-          end
-        end
-      end
-    else
-      for i = 1, num_voices do
-        if msg.ch == params:get("midi_channel_" .. i) then
-          if i == params:get("polyphonic_voice") then
-            local chord = active_notes[i]
-            table.insert(chord, msg.note)
-            voice_active[i] = true
-            -- Do not re-read the sample so the playhead isn't reset.
-            if #chord == 1 then
-              engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
-              engine.gate(i, 1)
-              envelope_attack(i)
-            else
-              engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
-            end
-            if #chord >= 2 then
-              if #chord == 2 then
-                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
-                engine.gate(6, 1)
-                envelope_attack(6)
-                engine.jitter(6, params:get(i .. "jitter") / 1000)
-                engine.size(6, params:get(i .. "size") / 1000)
-                engine.density(6, params:get(i .. "density"))
-                engine.spread(6, params:get(i .. "spread") / 100)
-                engine.envscale(6, params:get(i .. "fade") / 1000)
-                engine.seek(6, params:get(i .. "seek") / 100)
-                engine.pan(6, params:get(i .. "pan"))
-              else
-                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
-              end
-            else
-              engine.gate(6, 0)
-            end
-            if #chord >= 3 then
-              if #chord == 3 then
-                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
-                engine.gate(7, 1)
-                envelope_attack(7)
-                engine.jitter(7, params:get(i .. "jitter") / 1000)
-                engine.size(7, params:get(i .. "size") / 1000)
-                engine.density(7, params:get(i .. "density"))
-                engine.spread(7, params:get(i .. "spread") / 100)
-                engine.envscale(7, params:get(i .. "fade") / 1000)
-                engine.seek(7, params:get(i .. "seek") / 100)
-                engine.pan(7, params:get(i .. "pan"))
-              else
-                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
-              end
-            else
-              engine.gate(7, 0)
-            end
-            if #chord >= 2 then
-              if math.random() < 0.5 then
-                engine.pan(6, -1)
-                engine.pan(7, 1)
-              else
-                engine.pan(6, 1)
-                engine.pan(7, -1)
-              end
-            end
-            if #chord >= 2 then randomize_voice(6) end
-            if #chord >= 3 then randomize_voice(7) end
-          else
-            voice_active[i] = true
-            table.insert(active_notes[i], msg.note)
-            engine.pitch(i, math.pow(2, (msg.note - 60) / 12))
-            engine.gate(i, 1)
-            envelope_attack(i)
-          end
-        end
-      end
-    end
-  elseif msg.type == "note_off" then
-    for i = 1, num_voices do
-      if msg.ch == params:get("midi_channel_" .. i) then
-        if i == params:get("polyphonic_voice") then
           local chord = active_notes[i]
           for j, n in ipairs(chord) do
             if n == msg.note then table.remove(chord, j) break end
@@ -499,63 +326,198 @@ function midi_event(data)
           if #chord == 0 then
             voice_active[i] = false
             envelope_release(i)
-            engine.gate(6, 0)
-            engine.gate(7, 0)
+            local aux1 = 2 * i + 4
+            local aux2 = 2 * i + 5
+            engine.gate(aux1, 0)
+            engine.gate(aux2, 0)
           else
             if msg.note == chord[1] then
               engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
               engine.gate(i, 1)
               envelope_attack(i)
+              engine.pan(i, params:get(i .. "pan"))
             else
               engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
             end
+            local aux1 = 2 * i + 4
             if #chord >= 2 then
               if #chord == 2 then
-                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
-                engine.gate(6, 1)
-                envelope_attack(6)
-                engine.jitter(6, params:get(i .. "jitter") / 1000)
-                engine.size(6, params:get(i .. "size") / 1000)
-                engine.density(6, params:get(i .. "density"))
-                engine.spread(6, params:get(i .. "spread") / 100)
-                engine.envscale(6, params:get(i .. "fade") / 1000)
-                engine.seek(6, params:get(i .. "seek") / 100)
-                engine.pan(6, params:get(i .. "pan"))
+                engine.pitch(aux1, math.pow(2, (chord[2] - 60) / 12))
+                engine.gate(aux1, 1)
+                envelope_attack(aux1)
+                engine.jitter(aux1, params:get(i .. "jitter") / 1000)
+                engine.size(aux1, params:get(i .. "size") / 1000)
+                engine.density(aux1, params:get(i .. "density"))
+                engine.spread(aux1, params:get(i .. "spread") / 100)
+                engine.envscale(aux1, params:get(i .. "fade") / 1000)
+                engine.seek(aux1, params:get(i .. "seek") / 100)
+                engine.pan(aux1, params:get(i .. "pan"))
               else
-                engine.pitch(6, math.pow(2, (chord[2] - 60) / 12))
+                engine.pitch(aux1, math.pow(2, (chord[2] - 60) / 12))
               end
             else
-              engine.gate(6, 0)
+              engine.gate(aux1, 0)
             end
+            local aux2 = 2 * i + 5
             if #chord >= 3 then
               if #chord == 3 then
-                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
-                engine.gate(7, 1)
-                envelope_attack(7)
-                engine.jitter(7, params:get(i .. "jitter") / 1000)
-                engine.size(7, params:get(i .. "size") / 1000)
-                engine.density(7, params:get(i .. "density"))
-                engine.spread(7, params:get(i .. "spread") / 100)
-                engine.envscale(7, params:get(i .. "fade") / 1000)
-                engine.seek(7, params:get(i .. "seek") / 100)
-                engine.pan(7, params:get(i .. "pan"))
+                engine.pitch(aux2, math.pow(2, (chord[3] - 60) / 12))
+                engine.gate(aux2, 1)
+                envelope_attack(aux2)
+                engine.jitter(aux2, params:get(i .. "jitter") / 1000)
+                engine.size(aux2, params:get(i .. "size") / 1000)
+                engine.density(aux2, params:get(i .. "density"))
+                engine.spread(aux2, params:get(i .. "spread") / 100)
+                engine.envscale(aux2, params:get(i .. "fade") / 1000)
+                engine.seek(aux2, params:get(i .. "seek") / 100)
+                engine.pan(aux2, params:get(i .. "pan"))
               else
-                engine.pitch(7, math.pow(2, (chord[3] - 60) / 12))
+                engine.pitch(aux2, math.pow(2, (chord[3] - 60) / 12))
               end
             else
-              engine.gate(7, 0)
+              engine.gate(aux2, 0)
+            end
+            if #chord >= 2 then
+              if math.random() < 0.5 then
+                engine.pan(aux1, -1)
+                engine.pan(aux2, 1)
+              else
+                engine.pan(aux1, 1)
+                engine.pan(aux2, -1)
+              end
+            end
+            if #chord >= 2 then randomize_voice(aux1) end
+            if #chord >= 3 then randomize_voice(aux2) end
+          end
+        end
+      end
+    else
+      -- note_on with vel > 0
+      for i = 1, num_voices do
+        if msg.ch == params:get("midi_channel_" .. i) then
+          local chord = active_notes[i]
+          table.insert(chord, msg.note)
+          voice_active[i] = true
+          if #chord == 1 then
+            engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
+            engine.gate(i, 1)
+            envelope_attack(i)
+          else
+            engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
+          end
+          engine.pan(i, params:get(i .. "pan"))
+          local aux1 = 2 * i + 4
+          if #chord >= 2 then
+            if #chord == 2 then
+              engine.pitch(aux1, math.pow(2, (chord[2] - 60) / 12))
+              engine.gate(aux1, 1)
+              envelope_attack(aux1)
+              engine.jitter(aux1, params:get(i .. "jitter") / 1000)
+              engine.size(aux1, params:get(i .. "size") / 1000)
+              engine.density(aux1, params:get(i .. "density"))
+              engine.spread(aux1, params:get(i .. "spread") / 100)
+              engine.envscale(aux1, params:get(i .. "fade") / 1000)
+              engine.seek(aux1, params:get(i .. "seek") / 100)
+              engine.pan(aux1, params:get(i .. "pan"))
+            else
+              engine.pitch(aux1, math.pow(2, (chord[2] - 60) / 12))
+            end
+          else
+            engine.gate(aux1, 0)
+          end
+          local aux2 = 2 * i + 5
+          if #chord >= 3 then
+            if #chord == 3 then
+              engine.pitch(aux2, math.pow(2, (chord[3] - 60) / 12))
+              engine.gate(aux2, 1)
+              envelope_attack(aux2)
+              engine.jitter(aux2, params:get(i .. "jitter") / 1000)
+              engine.size(aux2, params:get(i .. "size") / 1000)
+              engine.density(aux2, params:get(i .. "density"))
+              engine.spread(aux2, params:get(i .. "spread") / 100)
+              engine.envscale(aux2, params:get(i .. "fade") / 1000)
+              engine.seek(aux2, params:get(i .. "seek") / 100)
+              engine.pan(aux2, params:get(i .. "pan"))
+            else
+              engine.pitch(aux2, math.pow(2, (chord[3] - 60) / 12))
+            end
+          else
+            engine.gate(aux2, 0)
+          end
+          if #chord >= 2 then
+            if math.random() < 0.5 then
+              engine.pan(aux1, -1)
+              engine.pan(aux2, 1)
+            else
+              engine.pan(aux1, 1)
+              engine.pan(aux2, -1)
             end
           end
+          if #chord >= 2 then randomize_voice(aux1) end
+          if #chord >= 3 then randomize_voice(aux2) end
+        end
+      end
+    end
+  elseif msg.type == "note_off" then
+    for i = 1, num_voices do
+      if msg.ch == params:get("midi_channel_" .. i) then
+        local chord = active_notes[i]
+        for j, n in ipairs(chord) do
+          if n == msg.note then table.remove(chord, j) break end
+        end
+        if #chord == 0 then
+          voice_active[i] = false
+          envelope_release(i)
+          local aux1 = 2 * i + 4
+          local aux2 = 2 * i + 5
+          engine.gate(aux1, 0)
+          engine.gate(aux2, 0)
         else
-          for j, n in ipairs(active_notes[i]) do
-            if n == msg.note then table.remove(active_notes[i], j) break end
-          end
-          if #active_notes[i] == 0 then
-            voice_active[i] = false
-            envelope_release(i)
+          if msg.note == chord[1] then
+            engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
+            engine.gate(i, 1)
+            envelope_attack(i)
+            engine.pan(i, params:get(i .. "pan"))
           else
-            local last_note = active_notes[i][#active_notes[i]]
-            engine.pitch(i, math.pow(2, (last_note - 60) / 12))
+            engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
+          end
+          local aux1 = 2 * i + 4
+          if #chord >= 2 then
+            if #chord == 2 then
+              engine.pitch(aux1, math.pow(2, (chord[2] - 60) / 12))
+              engine.gate(aux1, 1)
+              envelope_attack(aux1)
+              engine.jitter(aux1, params:get(i .. "jitter") / 1000)
+              engine.size(aux1, params:get(i .. "size") / 1000)
+              engine.density(aux1, params:get(i .. "density"))
+              engine.spread(aux1, params:get(i .. "spread") / 100)
+              engine.envscale(aux1, params:get(i .. "fade") / 1000)
+              engine.seek(aux1, params:get(i .. "seek") / 100)
+              engine.pan(aux1, params:get(i .. "pan"))
+            else
+              engine.pitch(aux1, math.pow(2, (chord[2] - 60) / 12))
+            end
+          else
+            engine.gate(aux1, 0)
+          end
+          local aux2 = 2 * i + 5
+          if #chord >= 3 then
+            if #chord == 3 then
+              engine.pitch(aux2, math.pow(2, (chord[3] - 60) / 12))
+              engine.gate(aux2, 1)
+              envelope_attack(aux2)
+              engine.jitter(aux2, params:get(i .. "jitter") / 1000)
+              engine.size(aux2, params:get(i .. "size") / 1000)
+              engine.density(aux2, params:get(i .. "density"))
+              engine.spread(aux2, params:get(i .. "spread") / 100)
+              engine.envscale(aux2, params:get(i .. "fade") / 1000)
+              engine.seek(aux2, params:get(i .. "seek") / 100)
+              engine.pan(aux2, params:get(i .. "pan"))
+            else
+              engine.pitch(aux2, math.pow(2, (chord[3] - 60) / 12))
+            end
+          else
+            engine.gate(aux2, 0)
           end
         end
       end
