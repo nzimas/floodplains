@@ -1,5 +1,5 @@
 -- Floodplains
--- v. 20250212
+-- v. 20250223
 -- by @nzimas
 -- 
 -- Multitimbral granular synthesizer 
@@ -25,10 +25,6 @@ voice_active[6] = false
 voice_active[7] = false
 
 local ui_metro
-
-local g_transition_time_options = {}
-for t = 100, 1000, 100 do table.insert(g_transition_time_options, t) end
-for t = 1500, 90000, 500 do table.insert(g_transition_time_options, t) end
 
 local g_morph_time_options = {}
 for t = 0, 90000, 500 do table.insert(g_morph_time_options, t) end
@@ -88,10 +84,8 @@ local function smooth_transition(param_name, new_val, duration)
 end
 
 local function randomize_voice(i)
-  local transition_ms = g_transition_time_options[params:get("transition_time")]
   local morph_ms = g_morph_time_options[params:get("morph_time")]
-  local actual_ms = math.min(morph_ms, transition_ms)
-  local morph_duration = actual_ms / 1000
+  local morph_duration = morph_ms / 1000
 
   local new_jitter  = random_float(params:get("min_jitter"), params:get("max_jitter"))
   local new_size    = random_float(params:get("min_size"), params:get("max_size"))
@@ -209,21 +203,8 @@ local function setup_params()
   params:add_option("polyphonic_voice", "polyphonic voice", {"1", "2", "3", "4", "5"}, 1)
 
   params:add_separator("Transition")
-  params:add_option("transition_time", "transition time (ms)",
-    g_transition_time_options, 10)
   params:add_option("morph_time", "morph time (ms)",
     g_morph_time_options, 1)
-  params:set_action("morph_time", function(idx)
-    local morph = g_morph_time_options[idx]
-    local trans = g_transition_time_options[params:get("transition_time")]
-    if morph > trans then
-      local best_index = 1
-      for i = 1, #g_morph_time_options do
-        if g_morph_time_options[i] <= trans then best_index = i end
-      end
-      params:set("morph_time", best_index)
-    end
-  end)
 
   params:add_separator("Randomizer")
   params:add_taper("min_jitter", "jitter (min)", 0, 2000, 0, 5, "ms")
