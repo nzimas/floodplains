@@ -194,13 +194,34 @@ local function setup_params()
     params:add_separator("Voice " .. i .. " Filter")
     params:add_control(i.."filterCutoff", i.." filter cutoff",
       controlspec.new(20, 20000, "lin", 0.1, 8000, "Hz"))
-    params:set_action(i.."filterCutoff", function(val) engine.filterCutoff(i, val) end)
+    params:set_action(i.."filterCutoff", function(val)
+      engine.filterCutoff(i, val)
+      if params:get("polyphonic_voice") == i then
+        engine.filterCutoff(6, val)
+        engine.filterCutoff(7, val)
+      end
+    end)
     params:add_taper(i.."filterRQ", i.." filter resonance", 0.1, 2, 0.5, 0.01, "Q")
-    params:set_action(i.."filterRQ", function(val) engine.filterRQ(i, val) end)
+    params:set_action(i.."filterRQ", function(val)
+      engine.filterRQ(i, val)
+      if params:get("polyphonic_voice") == i then
+        engine.filterRQ(6, val)
+        engine.filterRQ(7, val)
+      end
+    end)
   end
 
   params:add_separator("Polyphony")
   params:add_option("polyphonic_voice", "polyphonic voice", {"1", "2", "3", "4", "5"}, 1)
+  params:set_action("polyphonic_voice", function(value)
+    local poly = value
+    local cutoff = params:get(poly .. "filterCutoff")
+    local rq = params:get(poly .. "filterRQ")
+    engine.filterCutoff(6, cutoff)
+    engine.filterCutoff(7, cutoff)
+    engine.filterRQ(6, rq)
+    engine.filterRQ(7, rq)
+  end)
 
   params:add_separator("Transition")
   params:add_option("morph_time", "morph time (ms)",
