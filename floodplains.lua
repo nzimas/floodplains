@@ -81,6 +81,7 @@ local function smooth_transition(param_name, new_val, duration)
   end)
 end
 
+-- Updated randomize_voice now also updates the aux voices for voice i.
 local function randomize_voice(i)
   local morph_ms = g_morph_time_options[params:get("morph_time")]
   local morph_duration = morph_ms / 1000
@@ -94,6 +95,29 @@ local function randomize_voice(i)
   smooth_transition(i.."size", new_size, morph_duration)
   smooth_transition(i.."density", new_density, morph_duration)
   smooth_transition(i.."spread", new_spread, morph_duration)
+
+  -- Also update the aux voices associated with main voice i.
+  clock.run(function()
+    local aux1 = 2 * i + 4
+    local aux2 = 2 * i + 5
+    local steps = 60
+    local dt = morph_duration / steps
+    for step = 1, steps do
+      local cur_jitter = params:get(i.."jitter")
+      local cur_size = params:get(i.."size")
+      local cur_density = params:get(i.."density")
+      local cur_spread = params:get(i.."spread")
+      engine.jitter(aux1, cur_jitter / 1000)
+      engine.jitter(aux2, cur_jitter / 1000)
+      engine.size(aux1, cur_size / 1000)
+      engine.size(aux2, cur_size / 1000)
+      engine.density(aux1, cur_density)
+      engine.density(aux2, cur_density)
+      engine.spread(aux1, cur_spread / 100)
+      engine.spread(aux2, cur_spread / 100)
+      clock.sleep(dt)
+    end
+  end)
 end
 
 local function randomize_all()
@@ -315,6 +339,16 @@ local function envelope_release(i)
   end)
 end
 
+-- NEW: Helper to force a full voice reset.
+local function retrigger_voice(i)
+  engine.gate(i, 0)
+  clock.run(function()
+    clock.sleep(0.01)  -- 10 ms delay to clear out previous grains
+    engine.gate(i, 1)
+    envelope_attack(i)
+  end)
+end
+
 -- MIDI event handler: every main voice is treated as polyphonic.
 function midi_event(data)
   local msg = midi.to_msg(data)
@@ -337,8 +371,7 @@ function midi_event(data)
           else
             if msg.note == chord[1] then
               engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
-              engine.gate(i, 1)
-              envelope_attack(i)
+              retrigger_voice(i)
               engine.pan(i, params:get(i .. "pan"))
             else
               engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
@@ -407,8 +440,7 @@ function midi_event(data)
           voice_active[i] = true
           if #chord == 1 then
             engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
-            engine.gate(i, 1)
-            envelope_attack(i)
+            retrigger_voice(i)
           else
             engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
           end
@@ -486,8 +518,7 @@ function midi_event(data)
         else
           if msg.note == chord[1] then
             engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
-            engine.gate(i, 1)
-            envelope_attack(i)
+            retrigger_voice(i)
             engine.pan(i, params:get(i .. "pan"))
           else
             engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
