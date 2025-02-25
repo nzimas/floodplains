@@ -1,5 +1,5 @@
 -- Floodplains
--- v. 20250223
+-- v. 20250225
 -- by @nzimas
 -- 
 -- Multitimbral granular synthesizer 
@@ -225,14 +225,6 @@ local function setup_params()
   params:add_taper("max_density", "density (max)", 0, 512, 40, 6, "hz")
   params:add_taper("min_spread", "spread (min)", 0, 100, 0, 0, "%")
   params:add_taper("max_spread", "spread (max)", 0, 100, 100, 0, "%")
-
-  params:add_separator("Reverb")
-  params:add_taper("reverb_mix", "* mix", 0, 100, 50, 0, "%")
-  params:set_action("reverb_mix", function(v) engine.reverb_mix(v / 100) end)
-  params:add_taper("reverb_room", "* room", 0, 100, 50, 0, "%")
-  params:set_action("reverb_room", function(v) engine.reverb_room(v / 100) end)
-  params:add_taper("reverb_damp", "* damp", 0, 100, 50, 0, "%")
-  params:set_action("reverb_damp", function(v) engine.reverb_damp(v / 100) end)
 
   params:bang()
 end
