@@ -147,8 +147,11 @@ local function setup_params()
   
   params:add_separator("Samples & Voices")
   for i = 1, num_voices do
+    -- Begin each voice block with a clear header:
+    params:add_separator("VOICE " .. i)
+    
+    -- Sample and MIDI channel:
     params:add_file(i.."sample", i.." sample")
-    -- When loading a sample for a main voice, also load for its aux voices.
     params:set_action(i.."sample", function(file)
       engine.read(i, file)
       local aux1 = 2 * i + 4
@@ -157,9 +160,17 @@ local function setup_params()
       engine.read(aux2, file)
     end)
     params:add_number("midi_channel_" .. i, "MIDI channel " .. i, 1, 16, i)
+    
     -- Granular parameters:
     params:add_taper(i.."volume", i.." volume", -60, 20, 0, 0, "dB")
-    params:set_action(i.."volume", function(v) engine.volume(i, math.pow(10, v / 20)) end)
+    params:set_action(i.."volume", function(v)
+      local vol = math.pow(10, v / 20)
+      engine.volume(i, vol)
+      local aux1 = 2 * i + 4
+      local aux2 = 2 * i + 5
+      engine.volume(aux1, vol)
+      engine.volume(aux2, vol)
+    end)
     params:add_taper(i.."pan", i.." pan", -1, 1, 0, 0, "")
     params:set_action(i.."pan", function(v) engine.pan(i, v) end)
     params:add_taper(i.."jitter", i.." jitter", 0, 2000, 0, 5, "ms")
@@ -172,6 +183,8 @@ local function setup_params()
     params:set_action(i.."spread", function(val) engine.spread(i, val / 100) end)
     params:add_taper(i.."fade", i.." att/dec", 1, 9000, 1000, 3, "ms")
     params:set_action(i.."fade", function(val) engine.envscale(i, val / 1000) end)
+    
+    -- Seek and Random Seek parameters:
     params:add_control(i.."seek", i.." seek",
       controlspec.new(0, 100, "lin", 0.1, 0, "%", 0.1 / 100))
     params:set_action(i.."seek", function(val) engine.seek(i, val / 100) end)
@@ -210,12 +223,15 @@ local function setup_params()
         end
       end
     end)
-    -- Attack and Release parameters (in ms)
-    params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 10, 0, "ms")
+    
+    -- Envelope parameters:
+    params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 200, 0, "ms")
     params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
-    -- NEW: Random poly panning parameter (if "on", aux voices will be panned oppositely; if "off", they copy the main voice pan)
+    
+    -- Poly panning:
     params:add_option(i.."random_poly_pan", i.." random poly pan", {"off", "on"}, 2)
-    -- NEW: Filter subsection for voice i:
+    
+    -- Filter subsection:
     params:add_separator("Voice " .. i .. " Filter")
     params:add_control(i.."filterCutoff", i.." filter cutoff",
       controlspec.new(20, 20000, "lin", 0.1, 8000, "Hz"))
@@ -234,6 +250,9 @@ local function setup_params()
       engine.filterRQ(aux1, val)
       engine.filterRQ(aux2, val)
     end)
+    
+    -- Add a blank separator for extra space before the next voice block.
+    params:add_separator("")
   end
 
   params:add_separator("Transition")
@@ -250,7 +269,6 @@ local function setup_params()
   params:add_taper("min_spread", "spread (min)", 0, 100, 0, 0, "%")
   params:add_taper("max_spread", "spread (max)", 0, 100, 100, 0, "%")
 
-  -- New Delay parameters
   params:add_separator("Delay")
   params:add_control("delay_time", "Delay Time",
     controlspec.new(0.1, 2.0, "lin", 0.01, 0.5, "s"))
@@ -582,10 +600,6 @@ function midi_event(data)
   end
 end
 
--- New key handling:
--- K1: Long-press randomizes Voice 1.
--- K2: Short-press randomizes Voice 2; Long-press randomizes Voice 4.
--- K3: Short-press randomizes Voice 3; Long-press randomizes Voice 5.
 function key(n, z)
   if n == 1 then
     if z == 1 then
