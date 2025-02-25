@@ -1,8 +1,8 @@
 Engine_GlutXtd : CroneEngine {
-	classvar nvoices = 7;
+	classvar nvoices = 15;
 
 	var pg;
-	var effect;
+	var <delaySynth; // global delay effect synth
 	var <buffersL;
 	var <buffersR;
 	var <voices;
@@ -67,19 +67,10 @@ Engine_GlutXtd : CroneEngine {
 			gate=0, pos=0, speed=1, jitter=0,
 			size=0.1, density=20, pitch=1, pan=0, spread=0, gain=1, envscale=1,
 			freeze=0, t_reset_pos=0,
-			filterFreq=8000, filterRQ=0.5; // New resonant filter parameters
+			filterFreq=8000, filterRQ=0.5;
 
-			var grain_trig;
-			var jitter_sig;
-			var buf_dur;
-			var pan_sig;
-			var buf_pos;
-			var pos_sig;
-			var sig_l;
-			var sig_r;
-			var sig_mix;
-			var env;
-			var level;
+			var grain_trig, jitter_sig, buf_dur, pan_sig;
+			var buf_pos, pos_sig, sig_l, sig_r, sig_mix, env, level;
 
 			grain_trig = Impulse.kr(density);
 			buf_dur = BufDur.kr(buf_l);
@@ -111,15 +102,24 @@ Engine_GlutXtd : CroneEngine {
 
 			Out.ar(out, sig_mix * level * gain);
 			Out.kr(phase_out, pos_sig);
-			// ignore gain for level out
 			Out.kr(level_out, level);
 		}).add;
 
-		SynthDef(\effect, {
-			arg in, out, mix=0.5, room=0.5, damp=0.5;
-			var sig = In.ar(in, 2);
-			sig = FreeVerb.ar(sig, mix, room, damp);
-			Out.ar(out, sig);
+		// Global delay effect
+		SynthDef(\delay, {
+			arg in, out, delayTime=0.5, feedback=0.5, mix=0.5, maxDelay=2.0;
+			var dry, delayed, wet, fb;
+			// read the dry mix from the input bus
+			dry = In.ar(in, 2);
+			// read feedback from the local delay loop
+			fb = LocalIn.ar(2);
+			// delay the sum of dry signal and feedback
+			delayed = DelayL.ar(dry + (fb * feedback), maxDelay, delayTime);
+			// store delayed signal back into the local delay loop for feedback
+			LocalOut.ar(delayed);
+			wet = delayed;
+			// mix dry and wet signals
+			Out.ar(out, (dry * (1 - mix)) + (wet * mix));
 		}).add;
 
 		context.server.sync;
@@ -127,7 +127,8 @@ Engine_GlutXtd : CroneEngine {
 		// mix bus for all synth outputs
 		mixBus = Bus.audio(context.server, 2);
 
-		effect = Synth.new(\effect, [\in, mixBus.index, \out, context.out_b.index], target: context.xg);
+		// Instantiate the global delay effect
+		delaySynth = Synth.new(\delay, [\in, mixBus.index, \out, context.out_b.index], target: context.xg);
 
 		phases = Array.fill(nvoices, { arg i; Bus.control(context.server); });
 		levels = Array.fill(nvoices, { arg i; Bus.control(context.server); });
@@ -148,10 +149,7 @@ Engine_GlutXtd : CroneEngine {
 
 		context.server.sync;
 
-		this.addCommand("reverb_mix", "f", { arg msg; effect.set(\mix, msg[1]); });
-		this.addCommand("reverb_room", "f", { arg msg; effect.set(\room, msg[1]); });
-		this.addCommand("reverb_damp", "f", { arg msg; effect.set(\damp, msg[1]); });
-
+		// File read command remains unchanged
 		this.addCommand("read", "is", { arg msg;
 			this.readBuf(msg[1] - 1, msg[2]);
 		});
@@ -169,8 +167,6 @@ Engine_GlutXtd : CroneEngine {
 			if (false, { // disable seeking until fully implemented
 				var step;
 				var target_pos;
-
-				// TODO: async get
 				pos = phases[voice].getSynchronous();
 				voices[voice].set(\freeze, 1);
 
@@ -183,7 +179,6 @@ Engine_GlutXtd : CroneEngine {
 						voices[voice].set(\pos, pos);
 						seek_rate.wait;
 					});
-
 					voices[voice].set(\pos, target_pos);
 					voices[voice].set(\freeze, 0);
 					voices[voice].set(\t_reset_pos, 1);
@@ -192,7 +187,6 @@ Engine_GlutXtd : CroneEngine {
 				seek_tasks[voice].play();
 			}, {
 				pos = msg[2];
-
 				voices[voice].set(\pos, pos);
 				voices[voice].set(\t_reset_pos, 1);
 				voices[voice].set(\freeze, 0);
@@ -259,6 +253,11 @@ Engine_GlutXtd : CroneEngine {
 			voices[voice].set(\filterRQ, msg[2]);
 		});
 
+		// Global delay command handlers
+		this.addCommand("delay_time", "f", { arg msg; delaySynth.set(\delayTime, msg[1]); });
+		this.addCommand("delay_feedback", "f", { arg msg; delaySynth.set(\feedback, msg[1]); });
+		this.addCommand("delay_mix", "f", { arg msg; delaySynth.set(\mix, msg[1]); });
+
 		nvoices.do({ arg i;
 			this.addPoll(("phase_" ++ (i+1)).asSymbol, {
 				var val = phases[i].getSynchronous;
@@ -282,7 +281,7 @@ Engine_GlutXtd : CroneEngine {
 		levels.do({ arg bus; bus.free; });
 		buffersL.do({ arg b; b.free; });
 		buffersR.do({ arg b; b.free; });
-		effect.free;
+		delaySynth.free;
 		mixBus.free;
 	}
 }
