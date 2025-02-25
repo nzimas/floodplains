@@ -226,6 +226,16 @@ local function setup_params()
   params:add_taper("min_spread", "spread (min)", 0, 100, 0, 0, "%")
   params:add_taper("max_spread", "spread (max)", 0, 100, 100, 0, "%")
 
+  -- New Delay parameters
+  params:add_separator("Delay")
+  params:add_control("delay_time", "Delay Time",
+    controlspec.new(0.1, 2.0, "lin", 0.01, 0.5, "s"))
+  params:set_action("delay_time", function(v) engine.delay_time(v) end)
+  params:add_taper("delay_feedback", "Delay Feedback", 0, 100, 50, 0, "%")
+  params:set_action("delay_feedback", function(v) engine.delay_feedback(v/100) end)
+  params:add_taper("delay_mix", "Delay Mix", 0, 100, 50, 0, "%")
+  params:set_action("delay_mix", function(v) engine.delay_mix(v/100) end)
+
   params:bang()
 end
 
