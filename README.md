@@ -1,6 +1,6 @@
 # floodplains
 
-5-part / 15-voice, MIDI-controllable granular synthesizer for Norns.
+5-part / 15-voice, MIDI-playable granular synthesizer for Norns.
 
 5 polyphonic parts with assignable samples:
  - 3-note polyphony per part
