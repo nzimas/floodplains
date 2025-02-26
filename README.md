@@ -13,7 +13,7 @@ Main features:
 
 ## Instructions
 
-Long-press K1 to randomuze part 1
+Long-press K1 to randomize part 1
 Short-press K2 to randomize part 2
 Short-press K3 to randomize part 3
 Long-press K2 to randomize part 4
