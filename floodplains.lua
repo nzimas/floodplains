@@ -1,5 +1,5 @@
 -- Floodplains
--- v. 20250225
+-- v. 20250226
 -- by @nzimas
 -- 
 -- Multitimbral granular synthesizer 
@@ -145,10 +145,10 @@ local function setup_params()
     end
   }
   
-  params:add_separator("Samples & Voices")
+  params:add_separator("Parts")
   for i = 1, num_voices do
     -- Begin each voice block with a clear header:
-    params:add_separator("VOICE " .. i)
+    params:add_separator("PART " .. i)
     
     -- Sample and MIDI channel:
     params:add_file(i.."sample", i.." sample")
