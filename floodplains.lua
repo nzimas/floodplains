@@ -256,8 +256,7 @@ local function setup_params()
   end
 
   params:add_separator("Transition")
-  params:add_option("morph_time", "morph time (ms)",
-    g_morph_time_options, 1)
+  params:add_option("morph_time", "morph time (ms)", g_morph_time_options, 1)
 
   params:add_separator("Randomizer")
   params:add_taper("min_jitter", "jitter (min)", 0, 2000, 0, 5, "ms")
@@ -345,8 +344,13 @@ local function envelope_attack(i)
     local steps = math.max(1, math.floor(att_ms / 10))
     local dt = att_ms / steps / 1000
     local start_vol = current_env[i]
-    local target_vol = (i > num_voices) and params:get(math.floor((i - 4) / 2) .. "volume") or params:get(i .. "volume")
-    local target_pan = (i > num_voices) and params:get(math.floor((i - 4) / 2) .. "pan") or params:get(i .. "pan")
+    local target_vol = (i > num_voices)
+      and params:get(math.floor((i - 4) / 2) .. "volume")
+      or params:get(i .. "volume")
+    local target_pan = (i > num_voices)
+      and params:get(math.floor((i - 4) / 2) .. "pan")
+      or params:get(i .. "pan")
+
     engine.pan(i, target_pan)
     for step = 1, steps do
       local t = step / steps
@@ -401,7 +405,10 @@ function midi_event(data)
         if msg.ch == params:get("midi_channel_" .. i) then
           local chord = active_notes[i]
           for j, n in ipairs(chord) do
-            if n == msg.note then table.remove(chord, j) break end
+            if n == msg.note then
+              table.remove(chord, j)
+              break
+            end
           end
           if #chord == 0 then
             voice_active[i] = false
@@ -418,6 +425,7 @@ function midi_event(data)
             else
               engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
             end
+
             local aux1 = 2 * i + 4
             if #chord >= 2 then
               if #chord == 2 then
@@ -437,6 +445,7 @@ function midi_event(data)
             else
               engine.gate(aux1, 0)
             end
+
             local aux2 = 2 * i + 5
             if #chord >= 3 then
               if #chord == 3 then
@@ -456,8 +465,10 @@ function midi_event(data)
             else
               engine.gate(aux2, 0)
             end
+
             if #chord >= 2 then
               if params:get(i.."random_poly_pan") == 2 then
+                -- random L/R assignment for aux voices
                 if math.random() < 0.5 then
                   engine.pan(aux1, -1)
                   engine.pan(aux2, 1)
@@ -475,11 +486,13 @@ function midi_event(data)
         end
       end
     else
+      -- note_on normal
       for i = 1, num_voices do
         if msg.ch == params:get("midi_channel_" .. i) then
           local chord = active_notes[i]
           table.insert(chord, msg.note)
           voice_active[i] = true
+
           if #chord == 1 then
             engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
             retrigger_voice(i)
@@ -487,6 +500,7 @@ function midi_event(data)
             engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
           end
           engine.pan(i, params:get(i .. "pan"))
+
           local aux1 = 2 * i + 4
           if #chord >= 2 then
             if #chord == 2 then
@@ -506,6 +520,7 @@ function midi_event(data)
           else
             engine.gate(aux1, 0)
           end
+
           local aux2 = 2 * i + 5
           if #chord >= 3 then
             if #chord == 3 then
@@ -525,8 +540,10 @@ function midi_event(data)
           else
             engine.gate(aux2, 0)
           end
+
           if #chord >= 2 then
             if params:get(i.."random_poly_pan") == 2 then
+              -- random L/R assignment for aux voices
               if math.random() < 0.5 then
                 engine.pan(aux1, -1)
                 engine.pan(aux2, 1)
@@ -548,7 +565,10 @@ function midi_event(data)
       if msg.ch == params:get("midi_channel_" .. i) then
         local chord = active_notes[i]
         for j, n in ipairs(chord) do
-          if n == msg.note then table.remove(chord, j) break end
+          if n == msg.note then
+            table.remove(chord, j)
+            break
+          end
         end
         if #chord == 0 then
           voice_active[i] = false
@@ -565,6 +585,7 @@ function midi_event(data)
           else
             engine.pitch(i, math.pow(2, (chord[1] - 60) / 12))
           end
+
           local aux1 = 2 * i + 4
           if #chord >= 2 then
             if #chord == 2 then
@@ -584,6 +605,7 @@ function midi_event(data)
           else
             engine.gate(aux1, 0)
           end
+
           local aux2 = 2 * i + 5
           if #chord >= 3 then
             if #chord == 3 then
@@ -603,8 +625,10 @@ function midi_event(data)
           else
             engine.gate(aux2, 0)
           end
+
           if #chord >= 2 then
             if params:get(i.."random_poly_pan") == 2 then
+              -- random L/R assignment for aux voices
               if math.random() < 0.5 then
                 engine.pan(aux1, -1)
                 engine.pan(aux2, 1)
@@ -702,4 +726,7 @@ function init()
   setup_engine()
   midi_in = midi.connect(params:get("midi_device"))
   midi_in.event = midi_event
+
+  -- Randomize all 5 main voices at script init
+  randomize_all()
 end
