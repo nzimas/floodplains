@@ -1,287 +1,326 @@
 Engine_GlutXtd : CroneEngine {
-	classvar nvoices = 15;
+    classvar nvoices = 15;
 
-	var pg;
-	var <delaySynth; // global delay effect synth
-	var <buffersL;
-	var <buffersR;
-	var <voices;
-	var mixBus;
-	var <phases;
-	var <levels;
+    var pg;
+    var <delaySynth; // global delay effect synth
+    var <buffersL;
+    var <buffersR;
+    var <voices;
+    var mixBus;
+    var <phases;
+    var <levels;
 
-	var <seek_tasks;
+    var <seek_tasks;
 
-	*new { arg context, doneCallback;
-		^super.new(context, doneCallback);
-	}
+    *new { arg context, doneCallback;
+        ^super.new(context, doneCallback);
+    }
 
-	// disk read
-	readBuf { arg i, path;
-		if(buffersL[i].notNil && buffersR[i].notNil, {
-			if(File.exists(path), {
-				var numChannels;
-				var newbuf;
+    // disk read
+    readBuf { arg i, path;
+        if(buffersL[i].notNil && buffersR[i].notNil, {
+            if(File.exists(path), {
+                var numChannels;
+                var newbuf;
 
-				numChannels = SoundFile.use(path.asString(), { |f| f.numChannels });
+                numChannels = SoundFile.use(path.asString(), { |f| f.numChannels });
 
-				newbuf = Buffer.readChannel(context.server, path, 0, -1, [0], { |b|
-					voices[i].set(\buf_l, b);
-					buffersL[i].free;
-					buffersL[i] = b;
-				});
+                newbuf = Buffer.readChannel(context.server, path, 0, -1, [0], { |b|
+                    voices[i].set(\buf_l, b);
+                    buffersL[i].free;
+                    buffersL[i] = b;
+                });
 
-				if(numChannels > 1, {
-					newbuf = Buffer.readChannel(context.server, path, 0, -1, [1], { |b|
-						voices[i].set(\buf_r, b);
-						buffersR[i].free;
-						buffersR[i] = b;
-					});
-				}, {
-					voices[i].set(\buf_r, newbuf);
-					buffersR[i].free;
-					buffersR[i] = newbuf;
-				});
-			});
-		});
-	}
+                if(numChannels > 1, {
+                    newbuf = Buffer.readChannel(context.server, path, 0, -1, [1], { |b|
+                        voices[i].set(\buf_r, b);
+                        buffersR[i].free;
+                        buffersR[i] = b;
+                    });
+                }, {
+                    voices[i].set(\buf_r, newbuf);
+                    buffersR[i].free;
+                    buffersR[i] = newbuf;
+                });
+            });
+        });
+    }
 
-	alloc {
-		buffersL = Array.fill(nvoices, { arg i;
-			Buffer.alloc(
-				context.server,
-				context.server.sampleRate * 1
-			);
-		});
+    alloc {
+        buffersL = Array.fill(nvoices, { arg i;
+            Buffer.alloc(
+                context.server,
+                context.server.sampleRate * 1
+            );
+        });
 
-		buffersR = Array.fill(nvoices, { arg i;
-			Buffer.alloc(
-				context.server,
-				context.server.sampleRate * 1
-			);
-		});
+        buffersR = Array.fill(nvoices, { arg i;
+            Buffer.alloc(
+                context.server,
+                context.server.sampleRate * 1
+            );
+        });
 
-		// Extended SynthDef with resonant filter parameters
-		SynthDef(\synth, {
-			arg out, phase_out, level_out, buf_l, buf_r,
-			gate=0, pos=0, speed=1, jitter=0,
-			size=0.1, density=20, pitch=1, pan=0, spread=0, gain=1, envscale=1,
-			freeze=0, t_reset_pos=0,
-			filterFreq=8000, filterRQ=0.5;
+        // Extended SynthDef with resonant filter parameters
+        SynthDef(\synth, {
+            arg out, phase_out, level_out, buf_l, buf_r,
+                gate=0, pos=0, speed=1, jitter=0,
+                size=0.1, density=20, pitch=1, pan=0, spread=0, gain=1, envscale=1,
+                freeze=0, t_reset_pos=0,
+                filterFreq=8000, filterRQ=0.5;
 
-			var grain_trig, jitter_sig, buf_dur, pan_sig;
-			var buf_pos, pos_sig, sig_l, sig_r, sig_mix, env, level;
+            var grain_trig, jitter_sig, buf_dur, pan_sig;
+            var buf_pos, pos_sig, sig_l, sig_r, sig_mix, env, level;
 
-			grain_trig = Impulse.kr(density);
-			buf_dur = BufDur.kr(buf_l);
+            grain_trig = Impulse.kr(density);
+            buf_dur = BufDur.kr(buf_l);
 
-			pan_sig = TRand.kr(trig: grain_trig,
-				lo: spread.neg,
-				hi: spread);
+            pan_sig = TRand.kr(
+                trig: grain_trig,
+                lo: spread.neg,
+                hi: spread
+            );
 
-			jitter_sig = TRand.kr(trig: grain_trig,
-				lo: buf_dur.reciprocal.neg * jitter,
-				hi: buf_dur.reciprocal * jitter);
+            jitter_sig = TRand.kr(
+                trig: grain_trig,
+                lo: buf_dur.reciprocal.neg * jitter,
+                hi: buf_dur.reciprocal * jitter
+            );
 
-			buf_pos = Phasor.kr(trig: t_reset_pos,
-				rate: buf_dur.reciprocal / ControlRate.ir * speed,
-				resetPos: pos);
+            buf_pos = Phasor.kr(
+                trig: t_reset_pos,
+                rate: buf_dur.reciprocal / ControlRate.ir * speed,
+                resetPos: pos
+            );
 
-			pos_sig = Wrap.kr(Select.kr(freeze, [buf_pos, pos]));
+            pos_sig = Wrap.kr(Select.kr(freeze, [buf_pos, pos]));
 
-			sig_l = GrainBuf.ar(1, grain_trig, size, buf_l, pitch, pos_sig + jitter_sig, 2);
-			sig_r = GrainBuf.ar(1, grain_trig, size, buf_r, pitch, pos_sig + jitter_sig, 2);
+            sig_l = GrainBuf.ar(
+                1, grain_trig, size, buf_l, pitch, pos_sig + jitter_sig, 2
+            );
+            sig_r = GrainBuf.ar(
+                1, grain_trig, size, buf_r, pitch, pos_sig + jitter_sig, 2
+            );
 
-			sig_mix = Balance2.ar(sig_l, sig_r, pan + pan_sig);
+            sig_mix = Balance2.ar(sig_l, sig_r, pan + pan_sig);
 
-			// Apply resonant filter per voice
-			sig_mix = RLPF.ar(sig_mix, filterFreq, filterRQ);
+            // Apply resonant filter per voice
+            sig_mix = RLPF.ar(sig_mix, filterFreq, filterRQ);
 
-			env = EnvGen.kr(Env.asr(1, 1, 1), gate: gate, timeScale: envscale);
-			level = env;
+            env = EnvGen.kr(Env.asr(1, 1, 1), gate: gate, timeScale: envscale);
+            level = env;
 
-			Out.ar(out, sig_mix * level * gain);
-			Out.kr(phase_out, pos_sig);
-			Out.kr(level_out, level);
-		}).add;
+            Out.ar(out, sig_mix * level * gain);
+            Out.kr(phase_out, pos_sig);
+            Out.kr(level_out, level);
+        }).add;
 
-		// Global delay effect
-		SynthDef(\delay, {
-			arg in, out, delayTime=0.5, feedback=0.5, mix=0.5, maxDelay=2.0;
-			var dry, delayed, wet, fb;
-			// read the dry mix from the input bus
-			dry = In.ar(in, 2);
-			// read feedback from the local delay loop
-			fb = LocalIn.ar(2);
-			// delay the sum of dry signal and feedback
-			delayed = DelayL.ar(dry + (fb * feedback), maxDelay, delayTime);
-			// store delayed signal back into the local delay loop for feedback
-			LocalOut.ar(delayed);
-			wet = delayed;
-			// mix dry and wet signals
-			Out.ar(out, (dry * (1 - mix)) + (wet * mix));
-		}).add;
+        // Global delay effect + decimator
+        SynthDef(\delay, {
+            arg in, out,
+                delayTime=0.5, feedback=0.5, mix=0.5, maxDelay=2.0,
+                // Decimator parameters
+                deciRate=44100.0, deciBits=24, deciMul=1.0, deciAdd=0.0;
 
-		context.server.sync;
+            var dry, fb, delayed, wet, outSig;
 
-		// mix bus for all synth outputs
-		mixBus = Bus.audio(context.server, 2);
+            // read the dry signal from the input bus
+            dry = In.ar(in, 2);
 
-		// Instantiate the global delay effect
-		delaySynth = Synth.new(\delay, [\in, mixBus.index, \out, context.out_b.index], target: context.xg);
+            // read feedback from the local loop
+            fb = LocalIn.ar(2);
 
-		phases = Array.fill(nvoices, { arg i; Bus.control(context.server); });
-		levels = Array.fill(nvoices, { arg i; Bus.control(context.server); });
+            // pass sum of dry + feedback into delay
+            delayed = DelayL.ar(dry + (fb * feedback), maxDelay, delayTime);
 
-		pg = ParGroup.head(context.xg);
+            // decimate inside the feedback loop
+            delayed = Decimator.ar(
+                delayed,
+                rate: deciRate,
+                bits: deciBits,
+                mul: deciMul,
+                add: deciAdd
+            );
 
-		voices = Array.fill(nvoices, { arg i;
-			Synth.new(\synth, [
-				\out, mixBus.index,
-				\phase_out, phases[i].index,
-				\level_out, levels[i].index,
-				\buf_l, buffersL[i],
-				\buf_r, buffersR[i],
-				\filterFreq, 8000,    // default filter cutoff frequency
-				\filterRQ, 0.5        // default filter resonance (Q)
-			], target: pg);
-		});
+            // store delayed (now bit-reduced) signal back into local loop
+            LocalOut.ar(delayed);
 
-		context.server.sync;
+            // final wet/dry mix
+            wet = delayed;
+            outSig = (dry * (1 - mix)) + (wet * mix);
 
-		// File read command remains unchanged
-		this.addCommand("read", "is", { arg msg;
-			this.readBuf(msg[1] - 1, msg[2]);
-		});
+            Out.ar(out, outSig);
+        }).add;
 
-		this.addCommand("seek", "if", { arg msg;
-			var voice = msg[1] - 1;
-			var lvl, pos;
-			var seek_rate = 1 / 750;
+        context.server.sync;
 
-			seek_tasks[voice].stop;
+        // mix bus for all synth outputs
+        mixBus = Bus.audio(context.server, 2);
 
-			// TODO: async get
-			lvl = levels[voice].getSynchronous();
+        // Instantiate the global delay (with integrated decimator)
+        delaySynth = Synth.new(\delay, [
+            \in, mixBus.index,
+            \out, context.out_b.index
+        ], target: context.xg);
 
-			if (false, { // disable seeking until fully implemented
-				var step;
-				var target_pos;
-				pos = phases[voice].getSynchronous();
-				voices[voice].set(\freeze, 1);
+        phases = Array.fill(nvoices, { arg i; Bus.control(context.server); });
+        levels = Array.fill(nvoices, { arg i; Bus.control(context.server); });
 
-				target_pos = msg[2];
-				step = (target_pos - pos) * seek_rate;
+        pg = ParGroup.head(context.xg);
 
-				seek_tasks[voice] = Routine {
-					while({ abs(target_pos - pos) > abs(step) }, {
-						pos = pos + step;
-						voices[voice].set(\pos, pos);
-						seek_rate.wait;
-					});
-					voices[voice].set(\pos, target_pos);
-					voices[voice].set(\freeze, 0);
-					voices[voice].set(\t_reset_pos, 1);
-				};
+        voices = Array.fill(nvoices, { arg i;
+            Synth.new(\synth, [
+                \out, mixBus.index,
+                \phase_out, phases[i].index,
+                \level_out, levels[i].index,
+                \buf_l, buffersL[i],
+                \buf_r, buffersR[i],
+                \filterFreq, 8000,    // default filter cutoff frequency
+                \filterRQ, 0.5        // default filter resonance (Q)
+            ], target: pg);
+        });
 
-				seek_tasks[voice].play();
-			}, {
-				pos = msg[2];
-				voices[voice].set(\pos, pos);
-				voices[voice].set(\t_reset_pos, 1);
-				voices[voice].set(\freeze, 0);
-			});
-		});
+        context.server.sync;
 
-		this.addCommand("gate", "ii", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\gate, msg[2]);
-		});
+        // File read command remains unchanged
+        this.addCommand("read", "is", { arg msg;
+            this.readBuf(msg[1] - 1, msg[2]);
+        });
 
-		this.addCommand("speed", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\speed, msg[2]);
-		});
+        this.addCommand("seek", "if", { arg msg;
+            var voice = msg[1] - 1;
+            var lvl, pos;
+            var seek_rate = 1 / 750;
 
-		this.addCommand("jitter", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\jitter, msg[2]);
-		});
+            seek_tasks[voice].stop;
 
-		this.addCommand("size", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\size, msg[2]);
-		});
+            lvl = levels[voice].getSynchronous();
 
-		this.addCommand("density", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\density, msg[2]);
-		});
+            if (false, { // disable seeking until fully implemented
+                var step;
+                var target_pos;
+                pos = phases[voice].getSynchronous();
+                voices[voice].set(\freeze, 1);
 
-		this.addCommand("pitch", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\pitch, msg[2]);
-		});
+                target_pos = msg[2];
+                step = (target_pos - pos) * seek_rate;
 
-		this.addCommand("pan", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\pan, msg[2]);
-		});
+                seek_tasks[voice] = Routine {
+                    while({ abs(target_pos - pos) > abs(step) }, {
+                        pos = pos + step;
+                        voices[voice].set(\pos, pos);
+                        seek_rate.wait;
+                    });
+                    voices[voice].set(\pos, target_pos);
+                    voices[voice].set(\freeze, 0);
+                    voices[voice].set(\t_reset_pos, 1);
+                };
 
-		this.addCommand("spread", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\spread, msg[2]);
-		});
+                seek_tasks[voice].play();
+            }, {
+                pos = msg[2];
+                voices[voice].set(\pos, pos);
+                voices[voice].set(\t_reset_pos, 1);
+                voices[voice].set(\freeze, 0);
+            });
+        });
 
-		this.addCommand("volume", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\gain, msg[2]);
-		});
+        this.addCommand("gate", "ii", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\gate, msg[2]);
+        });
 
-		this.addCommand("envscale", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\envscale, msg[2]);
-		});
+        this.addCommand("speed", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\speed, msg[2]);
+        });
 
-		// New command handlers for resonant filter control
-		this.addCommand("filterCutoff", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\filterFreq, msg[2]);
-		});
-		this.addCommand("filterRQ", "if", { arg msg;
-			var voice = msg[1] - 1;
-			voices[voice].set(\filterRQ, msg[2]);
-		});
+        this.addCommand("jitter", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\jitter, msg[2]);
+        });
 
-		// Global delay command handlers
-		this.addCommand("delay_time", "f", { arg msg; delaySynth.set(\delayTime, msg[1]); });
-		this.addCommand("delay_feedback", "f", { arg msg; delaySynth.set(\feedback, msg[1]); });
-		this.addCommand("delay_mix", "f", { arg msg; delaySynth.set(\mix, msg[1]); });
+        this.addCommand("size", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\size, msg[2]);
+        });
 
-		nvoices.do({ arg i;
-			this.addPoll(("phase_" ++ (i+1)).asSymbol, {
-				var val = phases[i].getSynchronous;
-				val
-			});
+        this.addCommand("density", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\density, msg[2]);
+        });
 
-			this.addPoll(("level_" ++ (i+1)).asSymbol, {
-				var val = levels[i].getSynchronous;
-				val
-			});
-		});
+        this.addCommand("pitch", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\pitch, msg[2]);
+        });
 
-		seek_tasks = Array.fill(nvoices, { arg i;
-			Routine {}
-		});
-	}
+        this.addCommand("pan", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\pan, msg[2]);
+        });
 
-	free {
-		voices.do({ arg voice; voice.free; });
-		phases.do({ arg bus; bus.free; });
-		levels.do({ arg bus; bus.free; });
-		buffersL.do({ arg b; b.free; });
-		buffersR.do({ arg b; b.free; });
-		delaySynth.free;
-		mixBus.free;
-	}
+        this.addCommand("spread", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\spread, msg[2]);
+        });
+
+        this.addCommand("volume", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\gain, msg[2]);
+        });
+
+        this.addCommand("envscale", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\envscale, msg[2]);
+        });
+
+        // New command handlers for resonant filter control
+        this.addCommand("filterCutoff", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\filterFreq, msg[2]);
+        });
+
+        this.addCommand("filterRQ", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\filterRQ, msg[2]);
+        });
+
+        // Global delay command handlers
+        this.addCommand("delay_time", "f", { arg msg; delaySynth.set(\delayTime, msg[1]); });
+        this.addCommand("delay_feedback", "f", { arg msg; delaySynth.set(\feedback, msg[1]); });
+        this.addCommand("delay_mix", "f", { arg msg; delaySynth.set(\mix, msg[1]); });
+
+        // Decimator command handlers
+        this.addCommand("decimator_rate", "f", { arg msg; delaySynth.set(\deciRate, msg[1]); });
+        this.addCommand("decimator_bits", "f", { arg msg; delaySynth.set(\deciBits, msg[1]); });
+        this.addCommand("decimator_mul", "f", { arg msg; delaySynth.set(\deciMul, msg[1]); });
+        this.addCommand("decimator_add", "f", { arg msg; delaySynth.set(\deciAdd, msg[1]); });
+
+        nvoices.do({ arg i;
+            this.addPoll(("phase_" ++ (i+1)).asSymbol, {
+                var val = phases[i].getSynchronous;
+                val
+            });
+
+            this.addPoll(("level_" ++ (i+1)).asSymbol, {
+                var val = levels[i].getSynchronous;
+                val
+            });
+        });
+
+        seek_tasks = Array.fill(nvoices, { arg i;
+            Routine {}
+        });
+    }
+
+    free {
+        voices.do({ arg voice; voice.free; });
+        phases.do({ arg bus; bus.free; });
+        levels.do({ arg bus; bus.free; });
+        buffersL.do({ arg b; b.free; });
+        buffersR.do({ arg b; b.free; });
+        delaySynth.free;
+        mixBus.free;
+    }
 }
