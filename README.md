@@ -15,11 +15,11 @@ Main features:
 
 ## Instructions
 
-Long-press K1 to randomize part 1
-Short-press K2 to randomize part 2
-Short-press K3 to randomize part 3
-Long-press K2 to randomize part 4
-Long-press K3 to randomize part 5
+- Long-press K1 to randomize part 1
+- Short-press K2 to randomize part 2
+- Short-press K3 to randomize part 3
+- Long-press K2 to randomize part 4
+- Long-press K3 to randomize part 5
 
  - Norns
  - MIDI controller or sequencer
