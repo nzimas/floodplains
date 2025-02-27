@@ -21,6 +21,8 @@ Main features:
 - Long-press K2 to randomize part 4
 - Long-press K3 to randomize part 5
 
+## Requirements
+
  - Norns
  - MIDI controller or sequencer
 
