@@ -332,7 +332,7 @@ local function setup_params()
     params:add_separator("LFO " .. lfo_index)
 
     -- Voice (1..5)
-    params:add_number("lfo"..lfo_index.."_voice", "Voice", 1, 5, 1)
+    params:add_number("lfo"..lfo_index.."_voice", "Part", 1, 5, 1)
 
     -- Target
     params:add_option("lfo"..lfo_index.."_target", "Target", lfo_target_names, 1)
