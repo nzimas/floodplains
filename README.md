@@ -10,6 +10,8 @@ Main features:
  - Resonant lowpass filter per part
  - Global delay
  - Controlled randomization of granular parameters
+ - 3 freely assignable LFOs
+ - Decimator
 
 ## Instructions
 
