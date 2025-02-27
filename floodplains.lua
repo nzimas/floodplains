@@ -1,9 +1,9 @@
 -- Floodplains
--- v. 20250226
+-- v. 20250227
 -- by @nzimas
--- 
--- Multitimbral granular synthesizer 
--- Extensive config options in EDIT menu
+--
+-- Multitimbral granular synthesizer
+-- Extensive conf options in the EDIT menu
 
 engine.name = "GlutXtd"
 
@@ -144,12 +144,12 @@ local function setup_params()
       midi_in.event = midi_event
     end
   }
-  
+
   params:add_separator("Parts")
   for i = 1, num_voices do
     -- Begin each voice block with a clear header:
     params:add_separator("PART " .. i)
-    
+
     -- Sample and MIDI channel:
     params:add_file(i.."sample", i.." sample")
     params:set_action(i.."sample", function(file)
@@ -160,7 +160,7 @@ local function setup_params()
       engine.read(aux2, file)
     end)
     params:add_number("midi_channel_" .. i, "MIDI channel " .. i, 1, 16, i)
-    
+
     -- Granular parameters:
     params:add_taper(i.."volume", i.." volume", -60, 20, 0, 0, "dB")
     params:set_action(i.."volume", function(v)
@@ -183,7 +183,7 @@ local function setup_params()
     params:set_action(i.."spread", function(val) engine.spread(i, val / 100) end)
     params:add_taper(i.."fade", i.." att/dec", 1, 9000, 1000, 3, "ms")
     params:set_action(i.."fade", function(val) engine.envscale(i, val / 1000) end)
-    
+
     -- Seek and Random Seek parameters:
     params:add_control(i.."seek", i.." seek",
       controlspec.new(0, 100, "lin", 0.1, 0, "%", 0.1 / 100))
@@ -223,14 +223,14 @@ local function setup_params()
         end
       end
     end)
-    
+
     -- Envelope parameters:
     params:add_taper(i.."attack", i.." attack (ms)", 0, 5000, 200, 0, "ms")
     params:add_taper(i.."release", i.." release (ms)", 0, 5000, 1000, 0, "ms")
-    
+
     -- Poly panning:
     params:add_option(i.."random_poly_pan", i.." random poly pan", {"off", "on"}, 2)
-    
+
     -- Filter subsection:
     params:add_separator("Voice " .. i .. " Filter")
     params:add_control(i.."filterCutoff", i.." filter cutoff",
@@ -250,7 +250,7 @@ local function setup_params()
       engine.filterRQ(aux1, val)
       engine.filterRQ(aux2, val)
     end)
-    
+
     -- Add a blank separator for extra space before the next voice block.
     params:add_separator("")
   end
@@ -269,6 +269,29 @@ local function setup_params()
   params:add_taper("min_spread", "spread (min)", 0, 100, 0, 0, "%")
   params:add_taper("max_spread", "spread (max)", 0, 100, 100, 0, "%")
 
+  ----------------------------------------------------------------
+  -- NEW: Decimator section (above the Delay section)
+  ----------------------------------------------------------------
+  params:add_separator("Decimator")
+
+  params:add_control("decimator_rate", "decimator rate",
+    controlspec.new(1000, 48000, "exp", 0, 44100, "Hz"))
+  params:set_action("decimator_rate", function(v) engine.decimator_rate(v) end)
+
+  params:add_number("decimator_bits", "decimator bits", 1, 32, 24)
+  params:set_action("decimator_bits", function(v) engine.decimator_bits(v) end)
+
+  params:add_control("decimator_mul", "decimator mul",
+    controlspec.new(0, 5, "lin", 0, 1, ""))
+  params:set_action("decimator_mul", function(v) engine.decimator_mul(v) end)
+
+  params:add_control("decimator_add", "decimator add",
+    controlspec.new(0, 5, "lin", 0, 0, ""))
+  params:set_action("decimator_add", function(v) engine.decimator_add(v) end)
+
+  ----------------------------------------------------------------
+  -- Delay section
+  ----------------------------------------------------------------
   params:add_separator("Delay")
   params:add_control("delay_time", "Delay Time",
     controlspec.new(0.1, 2.0, "lin", 0.01, 0.5, "s"))
@@ -278,6 +301,7 @@ local function setup_params()
   params:add_taper("delay_mix", "Delay Mix", 0, 100, 50, 0, "%")
   params:set_action("delay_mix", function(v) engine.delay_mix(v/100) end)
 
+  -- finalize parameter loading
   params:bang()
 end
 
