@@ -300,6 +300,54 @@ local function setup_params()
   params:add_taper("delay_mix", "Delay Mix", 0, 100, 50, 0, "%")
   params:set_action("delay_mix", function(v) engine.delay_mix(v/100) end)
 
+  ----------------------------------------------------------------
+  -- NEW LFO section (3 separate LFOs)
+  ----------------------------------------------------------------
+  params:add_separator("LFOs")
+
+  -- We’ll store ranges for each target to make sure we stay in safe bounds:
+  local lfo_target_ranges = {
+    ["filter cutoff"] = {min = 20,   max = 20000,  engine_fn = function(voice, val)
+      engine.filterCutoff(voice, val)
+    end},
+    ["filter res"]    = {min = 0.1,  max = 2,       engine_fn = function(voice, val)
+      engine.filterRQ(voice, val)
+    end},
+    ["jitter"]        = {min = 0,    max = 2000,    engine_fn = function(voice, val)
+      engine.jitter(voice, val / 1000)
+    end},
+    ["density"]       = {min = 0,    max = 512,     engine_fn = function(voice, val)
+      engine.density(voice, val)
+    end},
+    ["size"]          = {min = 1,    max = 500,     engine_fn = function(voice, val)
+      engine.size(voice, val / 1000)
+    end},
+  }
+
+  local lfo_target_names = { "filter cutoff", "filter res", "jitter", "density", "size" }
+  local lfo_shape_names = { "sine", "triangle" }
+
+  -- We'll add parameters for 3 LFOs: LFO1, LFO2, LFO3
+  for lfo_index = 1, 3 do
+    params:add_separator("LFO " .. lfo_index)
+
+    -- Voice (1..5)
+    params:add_number("lfo"..lfo_index.."_voice", "Voice", 1, 5, 1)
+
+    -- Target
+    params:add_option("lfo"..lfo_index.."_target", "Target", lfo_target_names, 1)
+
+    -- Depth (0..100%)
+    params:add_taper("lfo"..lfo_index.."_depth", "Depth", 0, 100, 0, 0, "%")
+
+    -- Rate (in Hz)
+    params:add_control("lfo"..lfo_index.."_rate", "Rate",
+      controlspec.new(0.01, 20, "exp", 0, 1, "Hz"))
+
+    -- Shape (sine or triangle)
+    params:add_option("lfo"..lfo_index.."_shape", "Shape", lfo_shape_names, 1)
+  end
+
   -- finalize parameter loading
   params:bang()
 end
@@ -720,12 +768,122 @@ function redraw()
   screen.update()
 end
 
+----------------------------------------------------------------
+-- NEW: LFO Processing
+----------------------------------------------------------------
+-- We'll run a single metro to update all 3 LFOs in small time steps.
+-- Each LFO is a basic oscillator modulating the chosen parameter.
+local lfo_metro
+local lfo_phases = {0, 0, 0}
+
+-- Triangular wave helper
+local function tri_wave(phase)
+  -- phase in [0,1)
+  -- for a standard triangle wave in [-1..1], we do:
+  if phase < 0.25 then
+    return phase * 4
+  elseif phase < 0.75 then
+    return 2 - (phase * 4)
+  else
+    return (phase * 4) - 4
+  end
+end
+
+local function lfo_update()
+  for i = 1, 3 do
+    local depth = params:get("lfo"..i.."_depth")
+    if depth > 0.001 then
+      local voice = params:get("lfo"..i.."_voice")
+      local target_idx = params:get("lfo"..i.."_target")
+      local shape_idx  = params:get("lfo"..i.."_shape")
+      local rate       = params:get("lfo"..i.."_rate")
+
+      -- get base param from norns parameters:
+      local target_name = ({"filter cutoff","filter res","jitter","density","size"})[target_idx]
+      local base_param_id
+      if     target_name == "filter cutoff" then base_param_id = voice.."filterCutoff"
+      elseif target_name == "filter res"    then base_param_id = voice.."filterRQ"
+      elseif target_name == "jitter"        then base_param_id = voice.."jitter"
+      elseif target_name == "density"       then base_param_id = voice.."density"
+      elseif target_name == "size"          then base_param_id = voice.."size"
+      end
+
+      local base_val = params:get(base_param_id)
+      local ranges = {
+        ["filter cutoff"] = {20, 20000},
+        ["filter res"]    = {0.1, 2},
+        ["jitter"]        = {0, 2000},
+        ["density"]       = {0, 512},
+        ["size"]          = {1, 500},
+      }
+      local minv, maxv = table.unpack(ranges[target_name])
+
+      -- compute shape
+      local p = lfo_phases[i]
+      local wave
+      if shape_idx == 1 then
+        -- sine
+        wave = math.sin(2 * math.pi * p)
+      else
+        -- triangle
+        wave = tri_wave(p)
+      end
+      -- wave in [-1..1], scale by depth% of base_val
+      -- (Here we do a simple offset approach: param = base + wave*(depth% of base_val))
+      local offset = (wave * (depth / 100) * base_val)
+      local new_val = base_val + offset
+      -- clamp to safe range:
+      if new_val < minv then new_val = minv end
+      if new_val > maxv then new_val = maxv end
+
+      -- Update main voice and its 2 aux voices the same way
+      local aux1 = 2 * voice + 4
+      local aux2 = 2 * voice + 5
+
+      if target_name == "filter cutoff" then
+        engine.filterCutoff(voice, new_val)
+        engine.filterCutoff(aux1, new_val)
+        engine.filterCutoff(aux2, new_val)
+      elseif target_name == "filter res" then
+        engine.filterRQ(voice, new_val)
+        engine.filterRQ(aux1, new_val)
+        engine.filterRQ(aux2, new_val)
+      elseif target_name == "jitter" then
+        engine.jitter(voice, new_val / 1000)
+        engine.jitter(aux1, new_val / 1000)
+        engine.jitter(aux2, new_val / 1000)
+      elseif target_name == "density" then
+        engine.density(voice, new_val)
+        engine.density(aux1, new_val)
+        engine.density(aux2, new_val)
+      elseif target_name == "size" then
+        engine.size(voice, new_val / 1000)
+        engine.size(aux1, new_val / 1000)
+        engine.size(aux2, new_val / 1000)
+      end
+
+      -- update phase
+      lfo_phases[i] = (p + rate / 30) % 1 -- each tick is ~1/30th second
+    end
+  end
+end
+
+local function setup_lfo_metro()
+  lfo_metro = metro.init()
+  lfo_metro.time = 1 / 30 -- update 30 times a second
+  lfo_metro.event = lfo_update
+  lfo_metro:start()
+end
+
 function init()
   setup_ui_metro()
   setup_params()
   setup_engine()
   midi_in = midi.connect(params:get("midi_device"))
   midi_in.event = midi_event
+
+  -- Start LFO clock
+  setup_lfo_metro()
 
   -- Randomize all 5 main voices at script init
   randomize_all()
