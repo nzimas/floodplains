@@ -1,16 +1,17 @@
 -- Floodplains
--- v. 20250227
+-- v. 20250228
 -- by @nzimas
 --
 -- Multitimbral granular synthesizer
--- Extensive conf options in the EDIT menu
+-- This version sets speed=0 for all voices (main + aux)
+-- to avoid continuous looping. Instead, we rely on
+-- note_on gating and random/manual seeks.
 
 engine.name = "GlutXtd"
 
 local num_voices = 5   -- main voices 1..5
 local num_aux = 10     -- aux voices 6..15 (2 per main voice)
 
--- Tables for the main voices (1..5)
 local voice_active = {}
 local active_notes = {}
 local random_seek_metros = {}
@@ -21,27 +22,24 @@ for i = 1, num_voices do
   random_seek_metros[i] = nil
 end
 
--- Initialize aux voices (voices 6..15)
+-- Aux voices 6..15
 for i = num_voices+1, num_voices+num_aux do
   voice_active[i] = false
 end
 
 local ui_metro
 
+-- Times for morph transitions
 local g_morph_time_options = {}
 for t = 0, 90000, 500 do
   table.insert(g_morph_time_options, t)
 end
 
--- Key timing variables for K1, K2, K3:
-local key1_hold = false
-local key1_timer = 0
-local key2_hold = false
-local key2_timer = 0
-local key3_hold = false
-local key3_timer = 0
+-- Key hold logic
+local key1_hold, key2_hold, key3_hold = false,false,false
+local key1_timer, key2_timer, key3_timer = 0,0,0
 
--- Envelope globals (main + aux)
+-- Envelope globals
 local envelope_threads = {}
 local current_env = {}
 for i = 1, num_voices+num_aux do
@@ -49,7 +47,7 @@ for i = 1, num_voices+num_aux do
   current_env[i] = -60
 end
 
--- UI squares: main voices (1..5) in 2 rows
+-- UI squares
 local square_size = 20
 local positions = {}
 -- Top row: voices 1..3
@@ -63,10 +61,9 @@ local bottom_y = 40
 local bottom_margin = math.floor((128 - (2 * square_size)) / 3)
 positions[4] = { x = bottom_margin, y = bottom_y }
 positions[5] = { x = bottom_margin * 2 + square_size, y = bottom_y }
--- (Aux voices 6..15 have no UI squares)
 
 --------------------------------------------------
--- Utility Functions
+-- Utility
 --------------------------------------------------
 local function random_float(l, h)
   return l + math.random() * (h - l)
@@ -132,6 +129,9 @@ local function randomize_all()
   end
 end
 
+--------------------------------------------------
+-- UI / Metro
+--------------------------------------------------
 local function setup_ui_metro()
   ui_metro = metro.init()
   ui_metro.time = 1 / 15
@@ -142,18 +142,16 @@ local function setup_ui_metro()
 end
 
 --------------------------------------------------
--- Parameter Setup
+-- LFO Phase Storage
 --------------------------------------------------
-
--- We no longer have a separate global LFO section with a "voice" param;
--- instead, each voice (Part) has 3 LFOs, and each LFO is dedicated to that voice.
-
--- We'll define arrays for each voice's LFO phases, e.g. lfo_phases[voice][lfo_index].
 local lfo_phases = {}
 for i = 1, num_voices do
-  lfo_phases[i] = {0,0,0}  -- 3 LFOs
+  lfo_phases[i] = {0,0,0}  -- Each voice has 3 LFOs
 end
 
+--------------------------------------------------
+-- Setup Params
+--------------------------------------------------
 local function setup_params()
   params:add_separator("MIDI")
   params:add{
@@ -170,33 +168,13 @@ local function setup_params()
     end
   }
 
-  --------------------------------------------------
-  -- Per-Voice Parameter Submenus
-  --------------------------------------------------
+  -- For each of the 5 voices, we build a param group
   for i = 1, num_voices do
-    --------------------------------------------------
-    -- We define a group for each Part (voice)
-    --------------------------------------------------
-    -- We'll count the # of parameters to group them nicely. Let’s compute it:
-    -- Let's see how many lines:
-    --  1 file param
-    --  1 midi chan
-    --  8 granular params (volume,pan,jitter,size,density,spread,fade,seek)
-    --  2 random seek freq
-    --  1 random_seek on/off
-    --  2 envelope (attack/release)
-    --  1 poly panning
-    --  2 filter (cutoff,resonance)
-    --  3 LFO sub-blocks, each with 4 parameters = 12
-    --  => total 1+1+8+2+1+2+1+2+12 = 30
-    --
-    -- We'll add them with params:add_group("PART i", 30) so they appear as a submenu.
-    --
-    local group_size = 30
+    local group_size = 37  -- includes pitch shift etc.
     params:add_group("PART "..i, group_size)
 
     --------------------------------------------------
-    -- Standard voice parameters
+    -- Standard parameters
     --------------------------------------------------
     params:add_file(i.."sample", "sample file")
     params:set_action(i.."sample", function(file)
@@ -253,7 +231,12 @@ local function setup_params()
     params:add_control(i.."seek", i.." seek",
       controlspec.new(0, 100, "lin", 0.1, 0, "%", 0.1/100))
     params:set_action(i.."seek", function(val)
+      -- set main + aux to same position => no flanging
       engine.seek(i, val / 100)
+      local aux1 = 2*i + 4
+      local aux2 = 2*i + 5
+      engine.seek(aux1, val / 100)
+      engine.seek(aux2, val / 100)
     end)
 
     params:add_control(i.."random_seek_freq_min", i.." rnd seek freq min",
@@ -276,7 +259,8 @@ local function setup_params()
         if random_seek_metros[i] == nil then
           random_seek_metros[i] = metro.init()
           random_seek_metros[i].event = function()
-            params:set(i.."seek", math.random()*100)
+            local rand_val = math.random() * 100
+            params:set(i.."seek", rand_val)
             local tmin = params:get(i.."random_seek_freq_min")
             local tmax = params:get(i.."random_seek_freq_max")
             if tmax < tmin then tmin,tmax = tmax,tmin end
@@ -321,7 +305,80 @@ local function setup_params()
     end)
 
     --------------------------------------------------
-    -- LFO sub-block: 3 LFOs for this voice
+    -- Pitch Shift section
+    --------------------------------------------------
+    params:add_control(i.."ps_windowSize", "pitch shift window", 
+      controlspec.new(0.01, 1.0, "exp", 0, 0.1, "s"))
+    params:set_action(i.."ps_windowSize", function(val)
+      engine.ps_windowSize(i, val)
+      local aux1 = 2*i + 4
+      local aux2 = 2*i + 5
+      engine.ps_windowSize(aux1, val)
+      engine.ps_windowSize(aux2, val)
+    end)
+
+    params:add_control(i.."ps_pitchRatio", "pitch shift ratio",
+      controlspec.new(0.25, 4.0, "exp", 0, 1.0, ""))
+    params:set_action(i.."ps_pitchRatio", function(val)
+      engine.ps_pitchRatio(i, val)
+      local aux1 = 2*i + 4
+      local aux2 = 2*i + 5
+      engine.ps_pitchRatio(aux1, val)
+      engine.ps_pitchRatio(aux2, val)
+    end)
+
+    params:add_control(i.."ps_pitchDispersion", "pitch shift pdisp",
+      controlspec.new(0, 1.0, "lin", 0, 0.0, ""))
+    params:set_action(i.."ps_pitchDispersion", function(val)
+      engine.ps_pitchDispersion(i, val)
+      local aux1 = 2*i + 4
+      local aux2 = 2*i + 5
+      engine.ps_pitchDispersion(aux1, val)
+      engine.ps_pitchDispersion(aux2, val)
+    end)
+
+    params:add_control(i.."ps_timeDispersion", "pitch shift tdisp",
+      controlspec.new(0, 1.0, "lin", 0, 0.0, ""))
+    params:set_action(i.."ps_timeDispersion", function(val)
+      engine.ps_timeDispersion(i, val)
+      local aux1 = 2*i + 4
+      local aux2 = 2*i + 5
+      engine.ps_timeDispersion(aux1, val)
+      engine.ps_timeDispersion(aux2, val)
+    end)
+
+    params:add_control(i.."ps_mul", "pitch shift mul",
+      controlspec.new(0, 5.0, "lin", 0, 1.0, ""))
+    params:set_action(i.."ps_mul", function(val)
+      engine.ps_mul(i, val)
+      local aux1 = 2*i + 4
+      local aux2 = 2*i + 5
+      engine.ps_mul(aux1, val)
+      engine.ps_mul(aux2, val)
+    end)
+
+    params:add_control(i.."ps_add", "pitch shift add",
+      controlspec.new(0, 5.0, "lin", 0, 0.0, ""))
+    params:set_action(i.."ps_add", function(val)
+      engine.ps_add(i, val)
+      local aux1 = 2*i + 4
+      local aux2 = 2*i + 5
+      engine.ps_add(aux1, val)
+      engine.ps_add(aux2, val)
+    end)
+
+    params:add_trigger(i.."ps_reset", "reset pitch shift (K3)")
+    params:set_action(i.."ps_reset", function()
+      params:set(i.."ps_windowSize", 0.1)
+      params:set(i.."ps_pitchRatio", 1.0)
+      params:set(i.."ps_pitchDispersion", 0.0)
+      params:set(i.."ps_timeDispersion", 0.0)
+      params:set(i.."ps_mul", 1.0)
+      params:set(i.."ps_add", 0.0)
+    end)
+
+    --------------------------------------------------
+    -- 3 LFOs for this voice
     --------------------------------------------------
     local lfo_target_names = {
       "filter cutoff","filter res","jitter","density","size",
@@ -356,7 +413,7 @@ local function setup_params()
   end
 
   --------------------------------------------------
-  -- Transition and Randomizer
+  -- Transition + Randomizer
   --------------------------------------------------
   params:add_separator("Transition")
   params:add_option("morph_time", "morph time (ms)", g_morph_time_options, 1)
@@ -391,6 +448,14 @@ local function setup_params()
     controlspec.new(0, 5, "lin", 0, 0, ""))
   params:set_action("decimator_add", function(v) engine.decimator_add(v) end)
 
+  params:add_trigger("decimator_reset", "reset decimator (K3)")
+  params:set_action("decimator_reset", function()
+    params:set("decimator_rate", 44100)
+    params:set("decimator_bits", 24)
+    params:set("decimator_mul", 1)
+    params:set("decimator_add", 0)
+  end)
+
   --------------------------------------------------
   -- Delay
   --------------------------------------------------
@@ -410,7 +475,6 @@ local function setup_params()
     engine.delay_mix(v/100)
   end)
 
-  -- finalize
   params:bang()
 end
 
@@ -418,13 +482,17 @@ end
 -- Engine Setup
 --------------------------------------------------
 local function setup_engine()
+  -- speed=0 => no continuous scanning
   for i = 1, num_voices do
     engine.gate(i, 0)
     engine.speed(i, 0)
-  end
-  for i = num_voices+1, num_voices+num_aux do
-    engine.gate(i, 0)
-    engine.speed(i, 0)
+
+    local aux1 = 2*i + 4
+    local aux2 = 2*i + 5
+    engine.gate(aux1, 0)
+    engine.speed(aux1, 0)
+    engine.gate(aux2, 0)
+    engine.speed(aux2, 0)
   end
 end
 
@@ -459,12 +527,9 @@ local function envelope_attack(i)
     local steps = math.max(1, math.floor(att_ms / 10))
     local dt = att_ms / steps / 1000
     local start_vol = current_env[i]
-    local target_vol = (i > num_voices)
-      and params:get(math.floor((i - 4) / 2).."volume")
-      or  params:get(i.."volume")
-    local target_pan = (i > num_voices)
-      and params:get(math.floor((i - 4) / 2).."pan")
-      or  params:get(i.."pan")
+    local main = (i > num_voices) and math.floor((i - 4) / 2) or i
+    local target_vol = params:get(main.."volume")
+    local target_pan = params:get(main.."pan")
 
     engine.pan(i, target_pan)
     for step = 1, steps do
@@ -516,7 +581,7 @@ function midi_event(data)
   local msg = midi.to_msg(data)
   if msg.type == "note_on" then
     if msg.vel == 0 then
-      -- treat note_on with vel=0 as note_off
+      -- note_on with vel=0 => note_off
       for i = 1, num_voices do
         if msg.ch == params:get("midi_channel_"..i) then
           local chord = active_notes[i]
@@ -548,12 +613,12 @@ function midi_event(data)
                 engine.pitch(aux1, math.pow(2,(chord[2]-60)/12))
                 engine.gate(aux1, 1)
                 envelope_attack(aux1)
-                engine.jitter(aux1,   params:get(i.."jitter")/1000)
-                engine.size(aux1,     params:get(i.."size")/1000)
+                engine.jitter(aux1,   params:get(i.."jitter") / 1000)
+                engine.size(aux1,     params:get(i.."size") / 1000)
                 engine.density(aux1,  params:get(i.."density"))
-                engine.spread(aux1,   params:get(i.."spread")/100)
-                engine.envscale(aux1, params:get(i.."fade")/1000)
-                engine.seek(aux1,     params:get(i.."seek")/100)
+                engine.spread(aux1,   params:get(i.."spread") / 100)
+                engine.envscale(aux1, params:get(i.."fade") / 1000)
+                engine.seek(aux1,     params:get(i.."seek") / 100)
                 engine.pan(aux1,      params:get(i.."pan"))
               else
                 engine.pitch(aux1, math.pow(2,(chord[2]-60)/12))
@@ -568,12 +633,12 @@ function midi_event(data)
                 engine.pitch(aux2, math.pow(2,(chord[3]-60)/12))
                 engine.gate(aux2, 1)
                 envelope_attack(aux2)
-                engine.jitter(aux2,   params:get(i.."jitter")/1000)
-                engine.size(aux2,     params:get(i.."size")/1000)
+                engine.jitter(aux2,   params:get(i.."jitter") / 1000)
+                engine.size(aux2,     params:get(i.."size") / 1000)
                 engine.density(aux2,  params:get(i.."density"))
-                engine.spread(aux2,   params:get(i.."spread")/100)
-                engine.envscale(aux2, params:get(i.."fade")/1000)
-                engine.seek(aux2,     params:get(i.."seek")/100)
+                engine.spread(aux2,   params:get(i.."spread") / 100)
+                engine.envscale(aux2, params:get(i.."fade") / 1000)
+                engine.seek(aux2,     params:get(i.."seek") / 100)
                 engine.pan(aux2,      params:get(i.."pan"))
               else
                 engine.pitch(aux2, math.pow(2,(chord[3]-60)/12))
@@ -601,7 +666,7 @@ function midi_event(data)
         end
       end
     else
-      -- note_on normal
+      -- normal note_on
       for i = 1, num_voices do
         if msg.ch == params:get("midi_channel_"..i) then
           local chord = active_notes[i]
@@ -622,12 +687,12 @@ function midi_event(data)
               engine.pitch(aux1, math.pow(2,(chord[2]-60)/12))
               engine.gate(aux1, 1)
               envelope_attack(aux1)
-              engine.jitter(aux1,   params:get(i.."jitter")/1000)
-              engine.size(aux1,     params:get(i.."size")/1000)
+              engine.jitter(aux1,   params:get(i.."jitter") / 1000)
+              engine.size(aux1,     params:get(i.."size") / 1000)
               engine.density(aux1,  params:get(i.."density"))
-              engine.spread(aux1,   params:get(i.."spread")/100)
-              engine.envscale(aux1, params:get(i.."fade")/1000)
-              engine.seek(aux1,     params:get(i.."seek")/100)
+              engine.spread(aux1,   params:get(i.."spread") / 100)
+              engine.envscale(aux1, params:get(i.."fade") / 1000)
+              engine.seek(aux1,     params:get(i.."seek") / 100)
               engine.pan(aux1,      params:get(i.."pan"))
             else
               engine.pitch(aux1, math.pow(2,(chord[2]-60)/12))
@@ -642,12 +707,12 @@ function midi_event(data)
               engine.pitch(aux2, math.pow(2,(chord[3]-60)/12))
               engine.gate(aux2, 1)
               envelope_attack(aux2)
-              engine.jitter(aux2,   params:get(i.."jitter")/1000)
-              engine.size(aux2,     params:get(i.."size")/1000)
+              engine.jitter(aux2,   params:get(i.."jitter") / 1000)
+              engine.size(aux2,     params:get(i.."size") / 1000)
               engine.density(aux2,  params:get(i.."density"))
-              engine.spread(aux2,   params:get(i.."spread")/100)
-              engine.envscale(aux2, params:get(i.."fade")/1000)
-              engine.seek(aux2,     params:get(i.."seek")/100)
+              engine.spread(aux2,   params:get(i.."spread") / 100)
+              engine.envscale(aux2, params:get(i.."fade") / 1000)
+              engine.seek(aux2,     params:get(i.."seek") / 100)
               engine.pan(aux2,      params:get(i.."pan"))
             else
               engine.pitch(aux2, math.pow(2,(chord[3]-60)/12))
@@ -706,12 +771,12 @@ function midi_event(data)
               engine.pitch(aux1, math.pow(2,(chord[2]-60)/12))
               engine.gate(aux1, 1)
               envelope_attack(aux1)
-              engine.jitter(aux1,   params:get(i.."jitter")/1000)
-              engine.size(aux1,     params:get(i.."size")/1000)
+              engine.jitter(aux1,   params:get(i.."jitter") / 1000)
+              engine.size(aux1,     params:get(i.."size") / 1000)
               engine.density(aux1,  params:get(i.."density"))
-              engine.spread(aux1,   params:get(i.."spread")/100)
-              engine.envscale(aux1, params:get(i.."fade")/1000)
-              engine.seek(aux1,     params:get(i.."seek")/100)
+              engine.spread(aux1,   params:get(i.."spread") / 100)
+              engine.envscale(aux1, params:get(i.."fade") / 1000)
+              engine.seek(aux1,     params:get(i.."seek") / 100)
               engine.pan(aux1,      params:get(i.."pan"))
             else
               engine.pitch(aux1, math.pow(2,(chord[2]-60)/12))
@@ -726,12 +791,12 @@ function midi_event(data)
               engine.pitch(aux2, math.pow(2,(chord[3]-60)/12))
               engine.gate(aux2, 1)
               envelope_attack(aux2)
-              engine.jitter(aux2,   params:get(i.."jitter")/1000)
-              engine.size(aux2,     params:get(i.."size")/1000)
+              engine.jitter(aux2,   params:get(i.."jitter") / 1000)
+              engine.size(aux2,     params:get(i.."size") / 1000)
               engine.density(aux2,  params:get(i.."density"))
-              engine.spread(aux2,   params:get(i.."spread")/100)
-              engine.envscale(aux2, params:get(i.."fade")/1000)
-              engine.seek(aux2,     params:get(i.."seek")/100)
+              engine.spread(aux2,   params:get(i.."spread") / 100)
+              engine.envscale(aux2, params:get(i.."fade") / 1000)
+              engine.seek(aux2,     params:get(i.."seek") / 100)
               engine.pan(aux2,      params:get(i.."pan"))
             else
               engine.pitch(aux2, math.pow(2,(chord[3]-60)/12))
@@ -817,7 +882,7 @@ function key(n, z)
 end
 
 function enc(n, d)
-  -- no enc usage
+  -- no usage
 end
 
 function redraw()
@@ -837,10 +902,8 @@ function redraw()
 end
 
 --------------------------------------------------
--- LFO Processing
+-- LFO
 --------------------------------------------------
-
--- Triangular wave helper
 local function tri_wave(phase)
   if phase < 0.25 then
     return phase * 4
@@ -853,20 +916,17 @@ end
 
 local function lfo_update()
   for i = 1, num_voices do
-    -- Each voice has 3 LFOs
     for lfo_index = 1, 3 do
       local depth = params:get(i.."lfo"..lfo_index.."_depth")
       if depth > 0.001 then
         local target_idx= params:get(i.."lfo"..lfo_index.."_target")
         local shape_idx = params:get(i.."lfo"..lfo_index.."_shape")
         local rate      = params:get(i.."lfo"..lfo_index.."_rate")
-
         local target_name = ({
           "filter cutoff","filter res","jitter","density","size",
           "pan","volume"
         })[target_idx]
 
-        -- Base param ID
         local base_param_id
         if     target_name == "filter cutoff" then base_param_id = i.."filterCutoff"
         elseif target_name == "filter res"    then base_param_id = i.."filterRQ"
@@ -888,9 +948,7 @@ local function lfo_update()
         end
 
         local new_val
-
         if target_name == "pan" then
-          -- Swing around base_val ± offset
           local offset = wave * (depth/100)
           new_val = base_val + offset
           if new_val < -1 then new_val = -1 end
@@ -903,11 +961,7 @@ local function lfo_update()
           engine.pan(aux2, new_val)
 
         elseif target_name == "volume" then
-          -----------------------------------------------------
-          -- Only move downward from base if base≥0 or
-          -- never go above base if base<0
-          -----------------------------------------------------
-          local wave_pos = (wave * 0.5) + 0.5   -- [-1..1] => [0..1]
+          local wave_pos = (wave * 0.5) + 0.5
           local clamp_top = (base_val >= 0) and 0 or base_val
           local clamp_bot = -60
           local span = math.abs(clamp_bot - clamp_top)
@@ -924,9 +978,6 @@ local function lfo_update()
           engine.volume(aux2, amp)
 
         else
-          -----------------------------------------------------
-          -- filter cutoff, filter res, jitter, density, size
-          -----------------------------------------------------
           local ranges = {
             ["filter cutoff"] = {20, 20000},
             ["filter res"]    = {0.1, 2},
@@ -935,7 +986,6 @@ local function lfo_update()
             ["size"]          = {1, 500},
           }
           local minv, maxv = table.unpack(ranges[target_name])
-
           local offset = wave * (depth/100) * base_val
           new_val = base_val + offset
           if new_val < minv then new_val = minv end
@@ -966,7 +1016,6 @@ local function lfo_update()
           end
         end
 
-        -- Advance LFO phase
         lfo_phases[i][lfo_index] = (p + rate/30) % 1
       end
     end
@@ -974,10 +1023,10 @@ local function lfo_update()
 end
 
 local function setup_lfo_metro()
-  lfo_metro = metro.init()
-  lfo_metro.time = 1 / 30  -- 30x per second
-  lfo_metro.event = lfo_update
-  lfo_metro:start()
+  local lfo_m = metro.init()
+  lfo_m.time = 1 / 30
+  lfo_m.event = lfo_update
+  lfo_m:start()
 end
 
 --------------------------------------------------
@@ -986,13 +1035,12 @@ end
 function init()
   setup_ui_metro()
   setup_params()
-  setup_engine()
+  setup_engine()   -- sets speed=0 for main + aux => no scanning
   midi_in = midi.connect(params:get("midi_device"))
   midi_in.event = midi_event
 
-  -- Start LFO clock
   setup_lfo_metro()
 
-  -- Randomize all voices at init
+  -- optional: randomize at start
   randomize_all()
 end
