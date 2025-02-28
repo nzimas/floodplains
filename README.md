@@ -8,9 +8,10 @@ Main features:
  - MIDI channel per part
  - Sample slot per part
  - Resonant lowpass filter per part
+ - Granular pitch Shifter per part
  - Global delay
  - Controlled randomization of granular parameters
- - 3 freely assignable LFOs
+ - 3 freely assignable LFOs per part
  - Decimator
 
 ## Instructions
