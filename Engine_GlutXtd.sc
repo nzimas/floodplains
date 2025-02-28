@@ -61,17 +61,29 @@ Engine_GlutXtd : CroneEngine {
             );
         });
 
-        // Extended SynthDef with resonant filter parameters
+        // Extended SynthDef with resonant filter parameters + PitchShift
         SynthDef(\synth, {
-            arg out, phase_out, level_out, buf_l, buf_r,
+            arg out, phase_out, level_out,
+                buf_l, buf_r,
                 gate=0, pos=0, speed=1, jitter=0,
                 size=0.1, density=20, pitch=1, pan=0, spread=0, gain=1, envscale=1,
                 freeze=0, t_reset_pos=0,
-                filterFreq=8000, filterRQ=0.5;
+
+                // per-voice resonant filter
+                filterFreq=8000, filterRQ=0.5,
+
+                // PitchShift arguments
+                shiftWindow=0.1,
+                shiftRatio=1.0,
+                shiftPitchDispersion=0.0,
+                shiftTimeDispersion=0.0,
+                shiftMul=1.0,
+                shiftAdd=0.0;
 
             var grain_trig, jitter_sig, buf_dur, pan_sig;
             var buf_pos, pos_sig, sig_l, sig_r, sig_mix, env, level;
 
+            // Granular triggering
             grain_trig = Impulse.kr(density);
             buf_dur = BufDur.kr(buf_l);
 
@@ -87,6 +99,7 @@ Engine_GlutXtd : CroneEngine {
                 hi: buf_dur.reciprocal * jitter
             );
 
+            // Phase tracking
             buf_pos = Phasor.kr(
                 trig: t_reset_pos,
                 rate: buf_dur.reciprocal / ControlRate.ir * speed,
@@ -95,6 +108,7 @@ Engine_GlutXtd : CroneEngine {
 
             pos_sig = Wrap.kr(Select.kr(freeze, [buf_pos, pos]));
 
+            // Granular voices
             sig_l = GrainBuf.ar(
                 1, grain_trig, size, buf_l, pitch, pos_sig + jitter_sig, 2
             );
@@ -102,11 +116,24 @@ Engine_GlutXtd : CroneEngine {
                 1, grain_trig, size, buf_r, pitch, pos_sig + jitter_sig, 2
             );
 
+            // Combine L/R with per‐voice panning
             sig_mix = Balance2.ar(sig_l, sig_r, pan + pan_sig);
 
-            // Apply resonant filter per voice
+            // PitchShift inserted immediately after granular voices
+            sig_mix = PitchShift.ar(
+                sig_mix,
+                shiftWindow,
+                shiftRatio,
+                shiftPitchDispersion,
+                shiftTimeDispersion,
+                shiftMul,
+                shiftAdd
+            );
+
+            // Per-voice resonant filter
             sig_mix = RLPF.ar(sig_mix, filterFreq, filterRQ);
 
+            // Per-voice envelope
             env = EnvGen.kr(Env.asr(1, 1, 1), gate: gate, timeScale: envscale);
             level = env;
 
@@ -119,6 +146,7 @@ Engine_GlutXtd : CroneEngine {
         SynthDef(\delay, {
             arg in, out,
                 delayTime=0.5, feedback=0.5, mix=0.5, maxDelay=2.0,
+
                 // Decimator parameters
                 deciRate=44100.0, deciBits=24, deciMul=1.0, deciAdd=0.0;
 
@@ -142,7 +170,7 @@ Engine_GlutXtd : CroneEngine {
                 add: deciAdd
             );
 
-            // store delayed (now bit-reduced) signal back into local loop
+            // store delayed (bit-reduced) signal back into local loop
             LocalOut.ar(delayed);
 
             // final wet/dry mix
@@ -175,8 +203,8 @@ Engine_GlutXtd : CroneEngine {
                 \level_out, levels[i].index,
                 \buf_l, buffersL[i],
                 \buf_r, buffersR[i],
-                \filterFreq, 8000,    // default filter cutoff frequency
-                \filterRQ, 0.5        // default filter resonance (Q)
+                \filterFreq, 8000,
+                \filterRQ, 0.5
             ], target: pg);
         });
 
@@ -196,7 +224,7 @@ Engine_GlutXtd : CroneEngine {
 
             lvl = levels[voice].getSynchronous();
 
-            if (false, { // disable seeking until fully implemented
+            if (false, { // placeholder for potential advanced seeking
                 var step;
                 var target_pos;
                 pos = phases[voice].getSynchronous();
@@ -286,7 +314,7 @@ Engine_GlutXtd : CroneEngine {
             voices[voice].set(\filterRQ, msg[2]);
         });
 
-        // Global delay command handlers
+        // Commands for the global delay parameters
         this.addCommand("delay_time", "f", { arg msg; delaySynth.set(\delayTime, msg[1]); });
         this.addCommand("delay_feedback", "f", { arg msg; delaySynth.set(\feedback, msg[1]); });
         this.addCommand("delay_mix", "f", { arg msg; delaySynth.set(\mix, msg[1]); });
@@ -297,6 +325,38 @@ Engine_GlutXtd : CroneEngine {
         this.addCommand("decimator_mul", "f", { arg msg; delaySynth.set(\deciMul, msg[1]); });
         this.addCommand("decimator_add", "f", { arg msg; delaySynth.set(\deciAdd, msg[1]); });
 
+        // New commands for per‐voice PitchShift parameters
+        this.addCommand("ps_windowSize", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\shiftWindow, msg[2]);
+        });
+
+        this.addCommand("ps_pitchRatio", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\shiftRatio, msg[2]);
+        });
+
+        this.addCommand("ps_pitchDispersion", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\shiftPitchDispersion, msg[2]);
+        });
+
+        this.addCommand("ps_timeDispersion", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\shiftTimeDispersion, msg[2]);
+        });
+
+        this.addCommand("ps_mul", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\shiftMul, msg[2]);
+        });
+
+        this.addCommand("ps_add", "if", { arg msg;
+            var voice = msg[1] - 1;
+            voices[voice].set(\shiftAdd, msg[2]);
+        });
+
+        // set up polled phase & level readings
         nvoices.do({ arg i;
             this.addPoll(("phase_" ++ (i+1)).asSymbol, {
                 var val = phases[i].getSynchronous;
